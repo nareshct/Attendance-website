@@ -1,5 +1,6 @@
 import io
 from decimal import Decimal
+from xml.sax.saxutils import escape
 
 from django.db.models import Sum
 from reportlab.lib import colors
@@ -45,11 +46,11 @@ def render_invoice_pdf(invoice):
     elements.append(Spacer(1, 8 * mm))
 
     elements.append(Paragraph('Bill to', styles['Heading3']))
-    elements.append(Paragraph(invoice.client.company_name, styles['Normal']))
+    elements.append(Paragraph(escape(invoice.client.company_name), styles['Normal']))
     if invoice.client.contact_phone:
-        elements.append(Paragraph(invoice.client.contact_phone, styles['Normal']))
+        elements.append(Paragraph(escape(invoice.client.contact_phone), styles['Normal']))
     if invoice.client.contact_email:
-        elements.append(Paragraph(invoice.client.contact_email, styles['Normal']))
+        elements.append(Paragraph(escape(invoice.client.contact_email), styles['Normal']))
     elements.append(Spacer(1, 8 * mm))
 
     adjustments = ClientInvoiceAdjustment.objects.filter(

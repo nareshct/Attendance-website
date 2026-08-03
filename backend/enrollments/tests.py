@@ -11,7 +11,9 @@ from courses.models import Course
 from students.models import Student
 from trainers.models import Trainer
 
+from .certificate_pdf import render_certificate_pdf
 from .models import Enrollment
+from .report_pdf import render_student_report_pdf
 from .services import create_payment_plan, trainer_payment_gate, upfront_payment_for
 from .views import EnrollmentViewSet
 
@@ -469,3 +471,36 @@ class EnrollmentStatusSyncOnClassesTotalChangeTests(APITestCase):
         self.assertEqual(enrollment.status, 'completed')
         self.assertEqual(enrollment.classes_total, 24)
         self.assertFalse(AuditLog.objects.filter(action='enrollment_status_change').exists())
+
+
+class PdfGenerationEscapesUserTextTests(TestCase):
+    """A name containing markup-like characters must not break PDF generation — see
+    certificate_pdf.py/report_pdf.py's use of xml.sax.saxutils.escape() before passing
+    user text into ReportLab's Paragraph(), which otherwise interprets a small
+    HTML-like markup subset and would raise a parse error on malformed input like an
+    unclosed tag.
+    """
+
+    def setUp(self):
+        self.trainer = _make_trainer(username='trainer_pdf_escape')
+        self.trainer.name = 'Trainer <b>Bold</b> & Co'
+        self.trainer.save(update_fields=['name'])
+
+    def test_certificate_pdf_survives_a_malicious_student_name(self):
+        enrollment = _make_enrollment(self.trainer)
+        enrollment.student.name = '<script>alert(1)</script> <unclosed'
+        enrollment.student.save(update_fields=['name'])
+        enrollment.classes_completed = enrollment.classes_total
+        enrollment.status = 'completed'
+        enrollment.save(update_fields=['classes_completed', 'status'])
+
+        pdf_bytes = render_certificate_pdf(enrollment)
+        self.assertTrue(pdf_bytes.startswith(b'%PDF'))
+
+    def test_student_report_pdf_survives_a_malicious_student_name(self):
+        enrollment = _make_enrollment(self.trainer)
+        enrollment.student.name = '<font size="999">HUGE</font> <unclosed'
+        enrollment.student.save(update_fields=['name'])
+
+        pdf_bytes = render_student_report_pdf(enrollment)
+        self.assertTrue(pdf_bytes.startswith(b'%PDF'))

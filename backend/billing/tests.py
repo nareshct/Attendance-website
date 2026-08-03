@@ -13,6 +13,7 @@ from enrollments.models import Enrollment
 from enrollments.services import create_payment_plan
 from trainers.models import Trainer
 
+from .invoice_pdf import render_invoice_pdf
 from .models import BillingCycle, ClientInvoice, CycleRevenueSnapshot, Payout
 from .services import (
     b2c_totals_for_range,
@@ -326,3 +327,26 @@ class BillingCycleCloseTests(APITestCase):
 
         self.cycle.refresh_from_db()
         self.assertEqual(self.cycle.status, 'open')
+
+
+class InvoicePdfEscapesUserTextTests(TestCase):
+    """A client's name/phone/email containing markup-like characters must not break PDF
+    generation — see invoice_pdf.py's use of xml.sax.saxutils.escape() before passing
+    user text into ReportLab's Paragraph()."""
+
+    def test_invoice_pdf_survives_a_malicious_client_name(self):
+        client_obj = Client.objects.create(
+            company_name='<script>alert(1)</script> & <unclosed',
+            contact_phone='<b>unclosed',
+            contact_email='parent@example.com',
+            rate_per_class=Decimal('200'),
+        )
+        cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='closed',
+        )
+        invoice = ClientInvoice.objects.create(
+            client=client_obj, cycle=cycle, total_classes=5, total_amount=Decimal('1000.00'), status='pending',
+        )
+
+        pdf_bytes = render_invoice_pdf(invoice)
+        self.assertTrue(pdf_bytes.startswith(b'%PDF'))

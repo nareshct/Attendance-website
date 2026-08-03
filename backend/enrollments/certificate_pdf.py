@@ -1,5 +1,6 @@
 import io
 from datetime import date
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -66,9 +67,9 @@ def render_certificate_pdf(enrollment):
     elements.append(Spacer(1, 4 * mm))
     elements.append(Paragraph('CERTIFICATE OF COMPLETION', title_style))
     elements.append(Paragraph('This certifies that', sub_style))
-    elements.append(Paragraph(student.name, name_style))
+    elements.append(Paragraph(escape(student.name), name_style))
     elements.append(Paragraph('has successfully completed the course', body_style))
-    elements.append(Paragraph(course.name, course_style))
+    elements.append(Paragraph(escape(course.name), course_style))
     elements.append(Paragraph(
         f'{enrollment.classes_total} classes &nbsp;·&nbsp; '
         f'{enrollment.start_date:%d %b %Y} to {date.today():%d %b %Y}',
@@ -80,7 +81,7 @@ def render_certificate_pdf(enrollment):
     sig_name_style = ParagraphStyle('SigName', fontName='Helvetica-Bold', fontSize=11, textColor=NAVY_DARK, alignment=1, spaceAfter=2)
     sig_table = Table(
         [
-            [Paragraph(enrollment.trainer.name, sig_name_style), '', Paragraph(COMPANY_NAME, sig_name_style)],
+            [Paragraph(escape(enrollment.trainer.name), sig_name_style), '', Paragraph(COMPANY_NAME, sig_name_style)],
             [Paragraph('Trainer', sig_style), '', Paragraph('Coaching Center', sig_style)],
         ],
         colWidths=[CONTENT_WIDTH * 0.35, CONTENT_WIDTH * 0.3, CONTENT_WIDTH * 0.35],

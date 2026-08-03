@@ -1,5 +1,6 @@
 import io
 from datetime import date
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -121,8 +122,12 @@ def render_student_report_pdf(enrollment):
     name_style = ParagraphStyle('StudentName', fontName='Helvetica-Bold', fontSize=15, textColor=NAVY_DARK)
     meta_style = ParagraphStyle('StudentMeta', fontName='Helvetica', fontSize=9.5, textColor=GREY, spaceBefore=2)
     card_inner = Table(
-        [[Paragraph(student.name, name_style)],
-         [Paragraph(f'Student ID: <b>{student.student_id}</b> &nbsp;&nbsp;|&nbsp;&nbsp; Course: <b>{enrollment.course.name}</b>', meta_style)]],
+        [[Paragraph(escape(student.name), name_style)],
+         [Paragraph(
+             f'Student ID: <b>{escape(student.student_id)}</b> &nbsp;&nbsp;|&nbsp;&nbsp; '
+             f'Course: <b>{escape(enrollment.course.name)}</b>',
+             meta_style,
+         )]],
         colWidths=[CONTENT_WIDTH - 20 * mm],
     )
     card_inner.setStyle(TableStyle([
