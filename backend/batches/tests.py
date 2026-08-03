@@ -773,6 +773,23 @@ class TrainerSelfServiceTests(APITestCase):
         self.assertIn(self.my_batch.id, ids)
         self.assertNotIn(self.other_batch.id, ids)
 
+    def test_my_batches_never_exposes_a_co_trainers_payout(self):
+        # self.my_batch is co-taught by Priya (self.trainer) and Ravi (self.other_trainer).
+        BatchPayout.objects.create(batch=self.my_batch, recipient_name='Priya', amount=Decimal('3000'))
+        BatchPayout.objects.create(batch=self.my_batch, recipient_name='Ravi', amount=Decimal('5000'))
+
+        request = self.factory.get('/api/my-batches/')
+        force_authenticate(request, user=self.trainer.user)
+        response = MyBatchesView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+
+        rows = response.data['results'] if 'results' in response.data else response.data
+        batch_row = next(b for b in rows if b['id'] == self.my_batch.id)
+        recipients = {p['recipient_name'] for p in batch_row['payouts']}
+        amounts = {p['amount'] for p in batch_row['payouts']}
+        self.assertEqual(recipients, {'Priya'})
+        self.assertNotIn(Decimal('5000.00'), amounts)
+
     def test_trainer_can_log_session_for_their_own_batch(self):
         request = self.factory.post('/api/batch-sessions/', {
             'batch': self.my_batch.id, 'date': '2026-07-05', 'conducted_by_name': 'Priya',

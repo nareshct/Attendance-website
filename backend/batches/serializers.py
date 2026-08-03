@@ -112,3 +112,23 @@ class BatchSerializer(serializers.ModelSerializer):
         if invalid:
             raise serializers.ValidationError(f'Invalid day(s): {", ".join(invalid)}. Use {", ".join(DAYS_OF_WEEK)}.')
         return ','.join(d for d in DAYS_OF_WEEK if d in days)
+
+
+class MyBatchSerializer(BatchSerializer):
+    """Trainer-facing variant of BatchSerializer, used only by MyBatchesView.
+
+    The base `payouts` field lists every payout on a batch — every co-trainer's agreed
+    amount for co-taught batches — which would leak other trainers' pay to whoever's
+    just viewing their own batches. Scoped here to the requesting trainer's own
+    payout(s) on each batch, matching the case-insensitive name match
+    BatchPayoutViewSet already uses to scope trainer access.
+    """
+
+    payouts = serializers.SerializerMethodField()
+
+    def get_payouts(self, obj):
+        trainer_name = self.context['request'].user.trainer.name.lower()
+        # obj.payouts is prefetched by MyBatchesView.get_queryset() — filtering the
+        # already-fetched list in Python avoids a query per batch.
+        own_payouts = [p for p in obj.payouts.all() if p.recipient_name.lower() == trainer_name]
+        return BatchPayoutSerializer(own_payouts, many=True).data

@@ -23,6 +23,7 @@ from .serializers import (
     BatchPayoutSerializer,
     BatchSerializer,
     BatchSessionSerializer,
+    MyBatchSerializer,
 )
 from .services import (
     all_batches_summary,
@@ -114,7 +115,7 @@ class MyBatchesView(ListAPIView):
     so this can't be a normal FK filter). Read-only; a trainer logs sessions and views
     their own payouts for these batches through BatchSessionViewSet/BatchPayoutViewSet."""
 
-    serializer_class = BatchSerializer
+    serializer_class = MyBatchSerializer
     permission_classes = [IsTrainer]
 
     def get_queryset(self):
