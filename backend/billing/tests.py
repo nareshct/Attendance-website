@@ -13,7 +13,7 @@ from enrollments.models import Enrollment
 from enrollments.services import create_payment_plan
 from trainers.models import Trainer
 
-from .models import BillingCycle, ClientInvoice, CycleRevenueSnapshot
+from .models import BillingCycle, ClientInvoice, CycleRevenueSnapshot, Payout
 from .services import (
     b2c_totals_for_range,
     compute_admin_alerts,
@@ -22,7 +22,7 @@ from .services import (
     historical_rate,
     snapshot_cycle_revenue,
 )
-from .views import CycleRevenueHistoryView
+from .views import BillingCycleViewSet, CycleRevenueHistoryView
 
 
 def _make_trainer(username, rate):
@@ -256,3 +256,73 @@ class CycleRevenueHistoryLimitParamTests(APITestCase):
         response = CycleRevenueHistoryView.as_view()(request)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+
+
+class BillingCycleCloseTests(APITestCase):
+    """Closing a cycle generates its Payout/ClientInvoice/CycleRevenueSnapshot rows and
+    freezes it — see BillingCycleViewSet.close(). The status check + mutation run inside
+    a transaction with select_for_update() on the cycle row, so two concurrent closes
+    can't both pass the 'already closed' check before either writes 'closed' — this
+    confirms that lock didn't break the ordinary happy-path / already-closed behavior."""
+
+    def setUp(self):
+        from students.models import Student
+
+        self.admin = get_user_model().objects.create_user(username='admin_close_cycle', password='x', is_staff=True)
+        self.trainer = _make_trainer('trainer_close_cycle', Decimal('100'))
+        self.client_obj = Client.objects.create(
+            company_name='Close Cycle Co', contact_phone='123', rate_per_class=Decimal('200'),
+        )
+        self.course = Course.objects.create(name='Close Cycle Course', total_classes=24, rate_per_class=Decimal('300'))
+        self.student = Student.objects.create(name='Close Cycle Kid', grade='5', source_type='B2B', client=self.client_obj)
+        self.enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        self.cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='open',
+        )
+        Attendance.objects.create(
+            enrollment=self.enrollment, date=datetime.date(2026, 1, 5), status='present', marked_by=self.trainer,
+        )
+        self.factory = APIRequestFactory()
+
+    def _close(self):
+        request = self.factory.post(f'/api/billing-cycles/{self.cycle.id}/close/')
+        force_authenticate(request, user=self.admin)
+        return BillingCycleViewSet.as_view({'post': 'close'})(request, pk=self.cycle.id)
+
+    def test_close_generates_payout_invoice_and_snapshot_and_freezes_the_cycle(self):
+        response = self._close()
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'closed')
+
+        payout = Payout.objects.get(trainer=self.trainer, cycle=self.cycle)
+        self.assertEqual(payout.total_amount, Decimal('100.00'))
+        invoice = ClientInvoice.objects.get(client=self.client_obj, cycle=self.cycle)
+        self.assertEqual(invoice.total_amount, Decimal('200.00'))
+        self.assertTrue(CycleRevenueSnapshot.objects.filter(cycle=self.cycle).exists())
+
+    def test_closing_an_already_closed_cycle_returns_400_and_does_not_reprocess(self):
+        first = self._close()
+        self.assertEqual(first.status_code, 200, first.data)
+        payout_count_after_first_close = Payout.objects.filter(cycle=self.cycle).count()
+
+        second = self._close()
+        self.assertEqual(second.status_code, 400)
+        self.assertIn('already', second.data['detail'])
+
+        # No duplicate Payout rows were created by the second, rejected attempt.
+        self.assertEqual(Payout.objects.filter(cycle=self.cycle).count(), payout_count_after_first_close)
+
+    def test_non_admin_cannot_close_a_cycle(self):
+        trainer = _make_trainer('trainer_close_cycle_denied', Decimal('50'))
+        request = self.factory.post(f'/api/billing-cycles/{self.cycle.id}/close/')
+        force_authenticate(request, user=trainer.user)
+        response = BillingCycleViewSet.as_view({'post': 'close'})(request, pk=self.cycle.id)
+        self.assertEqual(response.status_code, 403)
+
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'open')

@@ -1,5 +1,6 @@
 import re
 
+from django.db import transaction
 from django.http import HttpResponse
 from rest_framework.decorators import action
 from rest_framework.generics import ListAPIView
@@ -42,15 +43,21 @@ class BillingCycleViewSet(ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def close(self, request, pk=None):
-        cycle = self.get_object()
-        if cycle.status != 'open':
-            return Response({'detail': f'Cycle is already {cycle.status}.'}, status=400)
+        self.get_object()  # 404 if missing, runs the standard permission checks
 
-        calculate_payouts_for_cycle(cycle)
-        calculate_client_invoices_for_cycle(cycle)
-        snapshot_cycle_revenue(cycle)
-        cycle.status = 'closed'
-        cycle.save(update_fields=['status'])
+        # Locked for the duration of this transaction so two concurrent "close" clicks
+        # can't both pass the status check before either writes 'closed' — see
+        # attendance/views.py's classes_completed fix for the same pattern.
+        with transaction.atomic():
+            cycle = BillingCycle.objects.select_for_update().get(pk=pk)
+            if cycle.status != 'open':
+                return Response({'detail': f'Cycle is already {cycle.status}.'}, status=400)
+
+            calculate_payouts_for_cycle(cycle)
+            calculate_client_invoices_for_cycle(cycle)
+            snapshot_cycle_revenue(cycle)
+            cycle.status = 'closed'
+            cycle.save(update_fields=['status'])
         return Response(BillingCycleSerializer(cycle).data)
 
     @action(detail=True, methods=['get'])
