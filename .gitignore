@@ -1,0 +1,22 @@
+venv/
+__pycache__/
+*.pyc
+backend/db.sqlite3
+backend/db.sqlite3.backup-*
+backend/.env
+backend/media/
+backend/backups/
+backend/staticfiles/
+backend/backup_dummy_data.json
+.env
+*.log
+node_modules/
+dist/
+build/
+.DS_Store
+
+# Local-only docs/test data, not part of the tracked source
+documentation.html
+documentation.pdf
+qa-audit-report.pdf
+test_batch_import_100.xlsx
