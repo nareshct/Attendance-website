@@ -1,7 +1,10 @@
 import datetime
 from decimal import Decimal
+from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
@@ -350,3 +353,61 @@ class InvoicePdfEscapesUserTextTests(TestCase):
 
         pdf_bytes = render_invoice_pdf(invoice)
         self.assertTrue(pdf_bytes.startswith(b'%PDF'))
+
+
+class CloseBillingCycleCommandTests(TestCase):
+    """The close_billing_cycle management command wraps the same close logic as
+    BillingCycleViewSet.close() for ops/cron use — see billing/management/commands/
+    close_billing_cycle.py."""
+
+    def setUp(self):
+        from students.models import Student
+
+        self.trainer = _make_trainer('trainer_close_cmd', Decimal('100'))
+        self.client_obj = Client.objects.create(
+            company_name='Close Cmd Co', contact_phone='123', rate_per_class=Decimal('200'),
+        )
+        self.course = Course.objects.create(name='Close Cmd Course', total_classes=24, rate_per_class=Decimal('300'))
+        self.student = Student.objects.create(name='Close Cmd Kid', grade='5', source_type='B2B', client=self.client_obj)
+        self.enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        self.cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='open',
+        )
+        Attendance.objects.create(
+            enrollment=self.enrollment, date=datetime.date(2026, 1, 5), status='present', marked_by=self.trainer,
+        )
+
+    def test_closes_the_specified_cycle_and_generates_payouts(self):
+        out = StringIO()
+        call_command('close_billing_cycle', self.cycle.id, stdout=out)
+
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'closed')
+        self.assertTrue(Payout.objects.filter(trainer=self.trainer, cycle=self.cycle).exists())
+        self.assertTrue(ClientInvoice.objects.filter(client=self.client_obj, cycle=self.cycle).exists())
+        self.assertIn('Closed cycle', out.getvalue())
+
+    def test_defaults_to_the_oldest_open_cycle_when_no_id_given(self):
+        out = StringIO()
+        call_command('close_billing_cycle', stdout=out)
+
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'closed')
+
+    def test_raises_command_error_for_an_already_closed_cycle(self):
+        self.cycle.status = 'closed'
+        self.cycle.save(update_fields=['status'])
+        with self.assertRaises(CommandError):
+            call_command('close_billing_cycle', self.cycle.id)
+
+    def test_raises_command_error_when_no_open_cycles_and_no_id_given(self):
+        self.cycle.delete()
+        with self.assertRaises(CommandError):
+            call_command('close_billing_cycle')
+
+    def test_raises_command_error_for_unknown_cycle_id(self):
+        with self.assertRaises(CommandError):
+            call_command('close_billing_cycle', 999999)

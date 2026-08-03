@@ -12,10 +12,10 @@ from students.models import Student
 from trainers.models import Trainer
 
 from .certificate_pdf import render_certificate_pdf
-from .models import Enrollment
+from .models import Enrollment, SubstituteAssignment
 from .report_pdf import render_student_report_pdf
 from .services import create_payment_plan, trainer_payment_gate, upfront_payment_for
-from .views import EnrollmentViewSet
+from .views import EnrollmentViewSet, PaymentInstallmentViewSet
 
 
 def _make_trainer(username='trainer'):
@@ -504,3 +504,160 @@ class PdfGenerationEscapesUserTextTests(TestCase):
 
         pdf_bytes = render_student_report_pdf(enrollment)
         self.assertTrue(pdf_bytes.startswith(b'%PDF'))
+
+
+class TransferActionTests(APITestCase):
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_transfer', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='trainer_transfer_from')
+        self.trainer.name = 'Original Trainer'
+        self.trainer.save(update_fields=['name'])
+        self.new_trainer = _make_trainer(username='trainer_transfer_to')
+        self.new_trainer.name = 'New Trainer'
+        self.new_trainer.save(update_fields=['name'])
+        self.enrollment = _make_enrollment(self.trainer)
+        self.factory = APIRequestFactory()
+
+    def _transfer(self, trainer_id):
+        request = self.factory.post(
+            f'/api/enrollments/{self.enrollment.id}/transfer/', {'trainer': trainer_id}, format='json',
+        )
+        force_authenticate(request, user=self.admin)
+        return EnrollmentViewSet.as_view({'post': 'transfer'})(request, pk=self.enrollment.id)
+
+    def test_transfer_reassigns_the_trainer_and_logs_it(self):
+        response = self._transfer(self.new_trainer.id)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.trainer_id, self.new_trainer.id)
+
+        log = AuditLog.objects.filter(action='enrollment_transfer').latest('created_at')
+        self.assertIn('Original Trainer', log.detail)
+        self.assertIn('New Trainer', log.detail)
+
+    def test_cannot_transfer_a_non_ongoing_enrollment(self):
+        self.enrollment.status = 'completed'
+        self.enrollment.save(update_fields=['status'])
+
+        response = self._transfer(self.new_trainer.id)
+        self.assertEqual(response.status_code, 400)
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.trainer_id, self.trainer.id)
+
+
+class WithdrawActionTests(APITestCase):
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_withdraw', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='trainer_withdraw')
+        self.enrollment = _make_enrollment(self.trainer, rate_per_class=Decimal('1000'))
+        self.plan = create_payment_plan(self.enrollment, 'two_installments', Decimal('24000'))
+        self.factory = APIRequestFactory()
+
+    def _withdraw(self, **body):
+        request = self.factory.post(f'/api/enrollments/{self.enrollment.id}/withdraw/', body, format='json')
+        force_authenticate(request, user=self.admin)
+        return EnrollmentViewSet.as_view({'post': 'withdraw'})(request, pk=self.enrollment.id)
+
+    def test_withdraw_cancels_pending_installments_and_logs_refund(self):
+        response = self._withdraw(refund_amount='5000', refund_note='parent requested refund')
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.status, 'withdrawn')
+
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.refunded_amount, Decimal('5000.00'))
+        self.assertEqual(self.plan.refund_note, 'parent requested refund')
+        self.assertFalse(self.plan.installments.filter(paid_status='pending').exists())
+        self.assertEqual(self.plan.installments.filter(paid_status='cancelled').count(), 2)
+
+        log = AuditLog.objects.filter(action='enrollment_withdraw').latest('created_at')
+        self.assertIn('refunded ₹5000', log.object_repr)
+        self.assertIn('installment(s) cancelled', log.object_repr)
+        self.assertEqual(log.detail, 'parent requested refund')
+
+    def test_withdraw_without_refund_amount_leaves_refunded_amount_at_zero(self):
+        response = self._withdraw()
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.refunded_amount, Decimal('0.00'))
+        self.assertEqual(self.plan.installments.filter(paid_status='cancelled').count(), 2)
+
+    def test_cannot_withdraw_a_non_ongoing_enrollment(self):
+        self.enrollment.status = 'withdrawn'
+        self.enrollment.save(update_fields=['status'])
+
+        response = self._withdraw()
+        self.assertEqual(response.status_code, 400)
+
+
+class AssignSubstituteActionTests(APITestCase):
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_assign_sub', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='trainer_sub_owner')
+        self.substitute = _make_trainer(username='trainer_sub_covering')
+        self.enrollment = _make_enrollment(self.trainer)
+        self.factory = APIRequestFactory()
+
+    def _assign(self, **body):
+        request = self.factory.post(
+            f'/api/enrollments/{self.enrollment.id}/assign_substitute/', body, format='json',
+        )
+        force_authenticate(request, user=self.admin)
+        return EnrollmentViewSet.as_view({'post': 'assign_substitute'})(request, pk=self.enrollment.id)
+
+    def test_assign_substitute_creates_coverage_and_logs_it(self):
+        response = self._assign(trainer=self.substitute.id, start_date='2026-02-01', end_date='2026-02-07')
+        self.assertEqual(response.status_code, 201, response.data)
+
+        self.assertTrue(SubstituteAssignment.objects.filter(
+            enrollment=self.enrollment, substitute_trainer=self.substitute,
+            start_date=datetime.date(2026, 2, 1), end_date=datetime.date(2026, 2, 7),
+        ).exists())
+        self.assertTrue(AuditLog.objects.filter(action='substitute_assign').exists())
+
+    def test_cannot_assign_substitute_to_a_non_ongoing_enrollment(self):
+        self.enrollment.status = 'completed'
+        self.enrollment.save(update_fields=['status'])
+
+        response = self._assign(trainer=self.substitute.id, start_date='2026-02-01', end_date='2026-02-07')
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(SubstituteAssignment.objects.filter(enrollment=self.enrollment).exists())
+
+
+class InstallmentMarkPaidRevokeTests(APITestCase):
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_installment', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='trainer_installment')
+        self.enrollment = _make_enrollment(self.trainer, rate_per_class=Decimal('1000'))
+        self.plan = create_payment_plan(self.enrollment, 'two_installments', Decimal('24000'))
+        self.installment = self.plan.installments.get(sequence=1)
+        self.factory = APIRequestFactory()
+
+    def test_mark_paid_flips_status_sets_paid_date_and_logs_it(self):
+        request = self.factory.post(f'/api/installments/{self.installment.id}/mark_paid/')
+        force_authenticate(request, user=self.admin)
+        response = PaymentInstallmentViewSet.as_view({'post': 'mark_paid'})(request, pk=self.installment.id)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.installment.refresh_from_db()
+        self.assertEqual(self.installment.paid_status, 'paid')
+        self.assertEqual(self.installment.paid_date, datetime.date.today())
+        self.assertTrue(AuditLog.objects.filter(action='installment_mark_paid').exists())
+
+    def test_revoke_reverts_to_pending_and_clears_paid_date(self):
+        self.installment.paid_status = 'paid'
+        self.installment.paid_date = datetime.date.today()
+        self.installment.save(update_fields=['paid_status', 'paid_date'])
+
+        request = self.factory.post(f'/api/installments/{self.installment.id}/revoke/')
+        force_authenticate(request, user=self.admin)
+        response = PaymentInstallmentViewSet.as_view({'post': 'revoke'})(request, pk=self.installment.id)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.installment.refresh_from_db()
+        self.assertEqual(self.installment.paid_status, 'pending')
+        self.assertIsNone(self.installment.paid_date)
+        self.assertTrue(AuditLog.objects.filter(action='installment_revoke').exists())

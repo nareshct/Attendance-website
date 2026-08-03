@@ -1,8 +1,24 @@
+from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
 from django.core.cache import cache
 from django.test import TestCase
-from rest_framework.test import APIRequestFactory
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
+from rest_framework.authtoken.models import Token
+from rest_framework.test import APIRequestFactory, force_authenticate
 
-from .views import LoginView
+from trainers.models import Trainer
+
+from .views import (
+    ChangePasswordView,
+    LoginView,
+    LogoutView,
+    MeView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
+    UpdateEmailView,
+)
 
 
 class LoginThrottleTests(TestCase):
@@ -28,3 +44,146 @@ class LoginThrottleTests(TestCase):
 
         self.assertEqual(statuses[:5], [401] * 5, 'the configured rate (5/min) should allow exactly 5 attempts through')
         self.assertEqual(statuses[5], 429, 'the 6th attempt within the window must be throttled')
+
+
+class LogoutViewTests(TestCase):
+    def test_logout_deletes_the_auth_token(self):
+        user = get_user_model().objects.create_user(username='logout_user', password='x')
+        Token.objects.create(user=user)
+        request = APIRequestFactory().post('/api/auth/logout/')
+        force_authenticate(request, user=user)
+        response = LogoutView.as_view()(request)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Token.objects.filter(user=user).exists())
+
+
+class ChangePasswordViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username='change_pw_user', password='OldPass123!')
+        self.factory = APIRequestFactory()
+
+    def _post(self, **body):
+        request = self.factory.post('/api/auth/change-password/', body, format='json')
+        force_authenticate(request, user=self.user)
+        return ChangePasswordView.as_view()(request)
+
+    def test_wrong_current_password_is_rejected(self):
+        response = self._post(current_password='WrongPass', new_password='NewPass456!')
+        self.assertEqual(response.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('OldPass123!'))
+
+    def test_correct_current_password_changes_it(self):
+        response = self._post(current_password='OldPass123!', new_password='NewPass456!')
+        self.assertEqual(response.status_code, 204)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('NewPass456!'))
+
+    def test_missing_fields_returns_400(self):
+        response = self._post(current_password='OldPass123!')
+        self.assertEqual(response.status_code, 400)
+
+
+class MeViewTests(TestCase):
+    def test_returns_admin_profile(self):
+        user = get_user_model().objects.create_user(username='me_admin', password='x', email='me@example.com', is_staff=True)
+        request = APIRequestFactory().get('/api/auth/me/')
+        force_authenticate(request, user=user)
+        response = MeView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], 'me_admin')
+        self.assertEqual(response.data['email'], 'me@example.com')
+        self.assertEqual(response.data['role'], 'admin')
+
+    def test_returns_trainer_profile_with_trainer_name_and_role(self):
+        user = get_user_model().objects.create_user(username='me_trainer', password='x')
+        Trainer.objects.create(user=user, name='Priya T', phone_number='0000000000', place='Here', default_rate_per_class=100)
+        request = APIRequestFactory().get('/api/auth/me/')
+        force_authenticate(request, user=user)
+        response = MeView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'Priya T')
+        self.assertEqual(response.data['role'], 'trainer')
+
+
+class UpdateEmailViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username='update_email_user', password='x')
+        self.factory = APIRequestFactory()
+
+    def _post(self, email):
+        request = self.factory.post('/api/auth/update-email/', {'email': email}, format='json')
+        force_authenticate(request, user=self.user)
+        return UpdateEmailView.as_view()(request)
+
+    def test_valid_email_is_saved(self):
+        response = self._post('new@example.com')
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, 'new@example.com')
+
+    def test_invalid_email_is_rejected(self):
+        response = self._post('not-an-email')
+        self.assertEqual(response.status_code, 400)
+
+    def test_empty_email_is_rejected(self):
+        response = self._post('')
+        self.assertEqual(response.status_code, 400)
+
+
+class PasswordResetRequestViewTests(TestCase):
+    def setUp(self):
+        # See LoginThrottleTests — PasswordResetRateThrottle shares this cache too.
+        cache.clear()
+
+    def test_existing_user_with_email_gets_generic_response_and_email_sent(self):
+        get_user_model().objects.create_user(username='reset_user', password='x', email='reset@example.com')
+        request = APIRequestFactory().post('/api/auth/password-reset/', {'username': 'reset_user'}, format='json')
+        response = PasswordResetRequestView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['detail'], PasswordResetRequestView.GENERIC_MESSAGE)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('reset@example.com', mail.outbox[0].to)
+
+    def test_nonexistent_user_gets_same_generic_response_and_no_email(self):
+        request = APIRequestFactory().post('/api/auth/password-reset/', {'username': 'nobody'}, format='json')
+        response = PasswordResetRequestView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['detail'], PasswordResetRequestView.GENERIC_MESSAGE)
+        self.assertEqual(len(mail.outbox), 0)
+
+
+class PasswordResetConfirmViewTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = get_user_model().objects.create_user(
+            username='confirm_reset_user', password='OldPass123!', email='confirm@example.com',
+        )
+        self.uidb64 = urlsafe_base64_encode(force_bytes(self.user.pk))
+        self.token = default_token_generator.make_token(self.user)
+        self.factory = APIRequestFactory()
+
+    def test_valid_uid_and_token_resets_the_password(self):
+        request = self.factory.post('/api/auth/password-reset/confirm/', {
+            'uid': self.uidb64, 'token': self.token, 'new_password': 'BrandNewPass789!',
+        }, format='json')
+        response = PasswordResetConfirmView.as_view()(request)
+        self.assertEqual(response.status_code, 204)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('BrandNewPass789!'))
+
+    def test_invalid_token_is_rejected(self):
+        request = self.factory.post('/api/auth/password-reset/confirm/', {
+            'uid': self.uidb64, 'token': 'garbage-token', 'new_password': 'BrandNewPass789!',
+        }, format='json')
+        response = PasswordResetConfirmView.as_view()(request)
+        self.assertEqual(response.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('OldPass123!'))
+
+    def test_invalid_uid_is_rejected(self):
+        request = self.factory.post('/api/auth/password-reset/confirm/', {
+            'uid': 'not-valid-base64', 'token': self.token, 'new_password': 'BrandNewPass789!',
+        }, format='json')
+        response = PasswordResetConfirmView.as_view()(request)
+        self.assertEqual(response.status_code, 400)
