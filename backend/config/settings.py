@@ -14,6 +14,8 @@ from pathlib import Path
 
 import dj_database_url
 from decouple import config
+from django.core.exceptions import ImproperlyConfigured
+from django.core.management.utils import get_random_secret_key
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,11 +24,29 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config('SECRET_KEY', default='django-insecure-x@bk_offwt)rbkn-jossg5-(k^i6o7&l410deo^dop=#cxq%+8')
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
+
+# SECURITY WARNING: keep the secret key used in production secret! No hardcoded
+# fallback here — a committed default would be a known-public secret the moment this
+# repo is public, and would be silently used if the real env var were ever missing in
+# production. In production (DEBUG=False), a missing SECRET_KEY fails loudly at
+# startup instead. In local dev, a fresh, ephemeral key is generated per run so
+# nothing crashes — but it means every restart invalidates existing sessions/CSRF
+# tokens/password-reset links; set SECRET_KEY in backend/.env for a stable local key.
+SECRET_KEY = config('SECRET_KEY', default=None)
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            'SECRET_KEY environment variable is not set. Refusing to start in '
+            'production (DEBUG=False) without one - see backend/README-DEPLOY.md.'
+        )
+    SECRET_KEY = get_random_secret_key()
+    print(
+        '\n*** WARNING: no SECRET_KEY set - using a random, ephemeral key for this dev '
+        'run only. Sessions/CSRF tokens/password-reset links will stop working on the '
+        'next restart. Set SECRET_KEY in backend/.env for a stable one. ***\n'
+    )
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=lambda v: [s.strip() for s in v.split(',')])
 
