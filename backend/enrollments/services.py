@@ -1,5 +1,9 @@
 from decimal import ROUND_HALF_UP, Decimal
 
+from rest_framework.exceptions import ValidationError
+
+from audit.services import log_action
+
 from .models import PLAN_SCHEDULES, Enrollment, PaymentInstallment, PaymentPlan, SubstituteAssignment
 
 
@@ -29,7 +33,7 @@ def upfront_payment_for(plan_type, total_amount, classes_total):
     return whole_rupees.quantize(Decimal('0.01'))
 
 
-def create_payment_plan(enrollment, plan_type, total_amount):
+def create_payment_plan(enrollment, plan_type, total_amount, discount_percent=Decimal('0.00')):
     """Build a PaymentPlan + its PaymentInstallment rows for a B2C enrollment.
 
     The first installment (due_at_classes=None) is always the plan's upfront
@@ -37,10 +41,16 @@ def create_payment_plan(enrollment, plan_type, total_amount):
     remainder is split evenly across the plan's other milestone installments,
     with the last one absorbing any rounding remainder so the installments
     always sum to exactly `total_amount`.
+
+    `discount_percent` is stored on the plan (not just applied here) so a later
+    classes_total edit can reprice with the same discount — see
+    recalculate_payment_plan().
     """
     milestones = PLAN_SCHEDULES[plan_type]
     first_payment = upfront_payment_for(plan_type, total_amount, enrollment.classes_total)
-    plan = PaymentPlan.objects.create(enrollment=enrollment, plan_type=plan_type, total_amount=total_amount)
+    plan = PaymentPlan.objects.create(
+        enrollment=enrollment, plan_type=plan_type, total_amount=total_amount, discount_percent=discount_percent,
+    )
 
     remaining = total_amount - first_payment
     remaining_count = len(milestones) - 1
@@ -61,6 +71,93 @@ def create_payment_plan(enrollment, plan_type, total_amount):
 
     PaymentInstallment.objects.bulk_create(installments)
     return plan
+
+
+def recalculate_payment_plan(plan, course, new_classes_total, user):
+    """Re-price a B2C PaymentPlan after its enrollment's classes_total changes (see
+    EnrollmentSerializer.update()). Reuses total_amount_for_discount() with the plan's
+    own discount_percent — the same calculation used to price it at creation (see
+    EnrollmentSerializer.create()) — so a batch-count edit reprices exactly the way a
+    fresh enrollment at that class count would have.
+
+    Already-paid installments are frozen — untouched, no exceptions. The difference
+    between the new total and what's already committed (paid + still-pending) is spread
+    evenly across the still-pending installments only, with the rounding remainder on
+    the last one so they keep summing exactly to the new balance.
+
+    Raises ValidationError if there's nothing pending left to absorb the difference (the
+    plan is fully paid), or if a downward edit would need to take more out of the
+    pending installments than they add up to.
+    """
+    plan = PaymentPlan.objects.select_for_update().get(pk=plan.pk)
+    old_total_amount = plan.total_amount
+    new_total_amount = total_amount_for_discount(course, new_classes_total, plan.discount_percent)
+    if new_total_amount == old_total_amount:
+        return
+
+    installments = list(plan.installments.select_for_update())
+    paid_total = sum((i.amount for i in installments if i.paid_status == 'paid'), Decimal('0.00'))
+    unpaid = [i for i in installments if i.paid_status == 'pending']
+    unpaid_total = sum((i.amount for i in unpaid), Decimal('0.00'))
+
+    difference = new_total_amount - paid_total - unpaid_total
+
+    if not unpaid:
+        raise ValidationError(
+            "This enrollment's payment plan is already fully paid — its batch count can't be "
+            'changed automatically. Handle this manually (e.g. a new enrollment or a manual '
+            'adjustment) instead.'
+        )
+    if unpaid_total + difference < 0:
+        raise ValidationError(
+            f'Reducing the batch count would need to take ₹{-difference} out of only '
+            f'₹{unpaid_total} of still-pending installments. Handle this manually instead.'
+        )
+
+    share = (difference / len(unpaid)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    changed = []
+    for i, installment in enumerate(unpaid, start=1):
+        old_amount = installment.amount
+        # Last unpaid installment absorbs the rounding remainder so the total is exact.
+        portion = (difference - share * (len(unpaid) - 1)) if i == len(unpaid) else share
+        # Defensive floor — in practice unreachable given the aggregate check above and
+        # that unpaid installments are already near-equal (see create_payment_plan), but
+        # guards against a single installment going negative if that's ever not true.
+        new_amount = max(old_amount + portion, Decimal('0.00'))
+        if new_amount != old_amount:
+            installment.amount = new_amount
+            changed.append((installment, old_amount, new_amount))
+
+    if changed:
+        PaymentInstallment.objects.bulk_update([c[0] for c in changed], ['amount'])
+
+    plan.total_amount = new_total_amount
+    plan.save(update_fields=['total_amount'])
+
+    change_summary = '; '.join(f'#{i.sequence} ₹{old} → ₹{new}' for i, old, new in changed)
+    log_action(
+        user, 'payment_plan_recalculate',
+        f'{plan.enrollment.student.name} — {plan.enrollment.course.name}',
+        f'total ₹{old_total_amount} → ₹{new_total_amount} (classes_total → {new_classes_total})'
+        + (f'; installments: {change_summary}' if change_summary else ''),
+    )
+
+
+def sync_enrollment_status_after_classes_total_change(enrollment, old_classes_total, new_classes_total, user):
+    """After classes_total changes, flip status between 'ongoing' and 'completed' to
+    match classes_completed — reuses Enrollment.sync_completion_status(), the same
+    transition logic attendance/views.py already uses after classes_completed itself
+    changes. Most commonly fires when an already-completed enrollment's batch count is
+    extended past classes_completed, reopening it so the trainer can mark the newly
+    added classes again.
+    """
+    old_status = enrollment.sync_completion_status()
+    if old_status is not None:
+        log_action(
+            user, 'enrollment_status_change',
+            f'{enrollment.student.name} — {enrollment.course.name}',
+            f'{old_status} → {enrollment.status} (classes_total {old_classes_total} → {new_classes_total})',
+        )
 
 
 def trainer_payment_gate(enrollment):

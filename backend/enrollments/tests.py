@@ -5,6 +5,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
+from attendance.views import AttendanceViewSet
+from audit.models import AuditLog
 from courses.models import Course
 from students.models import Student
 from trainers.models import Trainer
@@ -291,3 +293,179 @@ class EnrollmentSearchTests(APITestCase):
     def test_search_with_no_match_returns_empty(self):
         response = self._search('nonexistent-name-xyz')
         self.assertEqual(response.data['results'], [])
+
+
+class PaymentPlanRecalculationTests(APITestCase):
+    """Editing an ongoing B2C enrollment's classes_total must reprice its PaymentPlan
+    (see EnrollmentSerializer.update() / services.recalculate_payment_plan()) — already
+    paid installments are frozen, and the difference is spread across the still-pending
+    ones, rounding remainder on the last."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_recalc', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='trainer_recalc')
+        self.factory = APIRequestFactory()
+
+    def _patch_classes_total(self, enrollment, classes_total):
+        request = self.factory.patch(
+            f'/api/enrollments/{enrollment.id}/', {'classes_total': classes_total}, format='json',
+        )
+        force_authenticate(request, user=self.admin)
+        return EnrollmentViewSet.as_view({'patch': 'partial_update'})(request, pk=enrollment.id)
+
+    def test_extending_classes_total_spreads_difference_across_unpaid_with_rounding(self):
+        # rate 833.33/class chosen so the recalculated difference doesn't split evenly
+        # in cents, to exercise the remainder-on-last rounding.
+        enrollment = _make_enrollment(self.trainer, rate_per_class=Decimal('833.33'))
+        plan = create_payment_plan(enrollment, 'three_installments', Decimal('19999.92'))
+        first, second, third = plan.installments.order_by('sequence')
+        first.paid_status = 'paid'
+        first.save(update_fields=['paid_status'])
+
+        response = self._patch_classes_total(enrollment, 29)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        plan.refresh_from_db()
+        first.refresh_from_db()
+        second.refresh_from_db()
+        third.refresh_from_db()
+
+        self.assertEqual(plan.total_amount, Decimal('24166.57'))
+        # Paid installment is untouched — same amount, same status.
+        self.assertEqual(first.amount, Decimal('5000.00'))
+        self.assertEqual(first.paid_status, 'paid')
+        # The 4166.65 increase splits across the two unpaid installments, with the
+        # 1-paisa rounding remainder landing on the last one.
+        self.assertEqual(second.amount, Decimal('9583.29'))
+        self.assertEqual(third.amount, Decimal('9583.28'))
+        self.assertEqual(first.amount + second.amount + third.amount, plan.total_amount)
+
+    def test_fully_paid_plan_rejects_classes_total_edit(self):
+        enrollment = _make_enrollment(self.trainer, rate_per_class=Decimal('1000'))
+        plan = create_payment_plan(enrollment, 'two_installments', Decimal('24000'))
+        for installment in plan.installments.all():
+            installment.paid_status = 'paid'
+            installment.save(update_fields=['paid_status'])
+
+        response = self._patch_classes_total(enrollment, 28)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('fully paid', str(response.data))
+
+        # Nothing changed — the whole update rolled back.
+        plan.refresh_from_db()
+        enrollment.refresh_from_db()
+        self.assertEqual(plan.total_amount, Decimal('24000.00'))
+        self.assertEqual(enrollment.classes_total, 24)
+
+    def test_shrinking_below_pending_total_is_rejected(self):
+        enrollment = _make_enrollment(self.trainer, rate_per_class=Decimal('1000'))
+        plan = create_payment_plan(enrollment, 'two_installments', Decimal('24000'))
+        first, second = plan.installments.order_by('sequence')
+        first.paid_status = 'paid'
+        first.save(update_fields=['paid_status'])
+        # unpaid = second, worth 14000.00
+
+        # New total at 1 class would be 1000 — reducing from 24000 needs 23000 out of
+        # only 14000 of pending installments, which would floor below 0. Must be rejected.
+        response = self._patch_classes_total(enrollment, 1)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Handle this manually', str(response.data))
+
+        plan.refresh_from_db()
+        second.refresh_from_db()
+        enrollment.refresh_from_db()
+        self.assertEqual(plan.total_amount, Decimal('24000.00'))
+        self.assertEqual(second.amount, Decimal('14000.00'))
+        self.assertEqual(enrollment.classes_total, 24)
+
+    def test_shrinking_within_pending_total_succeeds(self):
+        enrollment = _make_enrollment(self.trainer, rate_per_class=Decimal('1000'))
+        plan = create_payment_plan(enrollment, 'two_installments', Decimal('24000'))
+        first, second = plan.installments.order_by('sequence')
+        first.paid_status = 'paid'
+        first.save(update_fields=['paid_status'])
+        # unpaid = second, worth 14000.00
+
+        # New total at 20 classes is 20000 — a 4000 reduction, comfortably absorbed by
+        # the single 14000 pending installment.
+        response = self._patch_classes_total(enrollment, 20)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        plan.refresh_from_db()
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(plan.total_amount, Decimal('20000.00'))
+        self.assertEqual(first.amount, Decimal('10000.00'))
+        self.assertEqual(first.paid_status, 'paid')
+        self.assertEqual(second.amount, Decimal('10000.00'))
+
+
+class EnrollmentStatusSyncOnClassesTotalChangeTests(APITestCase):
+    """Extending a completed enrollment's batch count must reopen it (status back to
+    'ongoing') so the trainer can mark the newly added classes — see
+    Enrollment.sync_completion_status() and
+    services.sync_enrollment_status_after_classes_total_change(). Shrinking it while
+    classes_completed still meets the new, lower total must leave status untouched."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_status_sync', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='trainer_status_sync')
+        self.course = Course.objects.create(name='Status Sync Course', total_classes=24, rate_per_class=Decimal('1000'))
+        self.student = Student.objects.create(name='Status Sync Kid', grade='5', source_type='B2C')
+        self.factory = APIRequestFactory()
+
+    def _patch_classes_total(self, enrollment, classes_total):
+        request = self.factory.patch(
+            f'/api/enrollments/{enrollment.id}/', {'classes_total': classes_total}, format='json',
+        )
+        force_authenticate(request, user=self.admin)
+        return EnrollmentViewSet.as_view({'patch': 'partial_update'})(request, pk=enrollment.id)
+
+    def test_extending_a_completed_enrollment_reopens_it_and_allows_marking_the_new_class(self):
+        enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer, status='completed',
+            classes_completed=24, classes_total=24,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+
+        response = self._patch_classes_total(enrollment, 28)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.status, 'ongoing')
+        self.assertEqual(enrollment.classes_total, 28)
+
+        log = AuditLog.objects.filter(action='enrollment_status_change').latest('created_at')
+        self.assertIn('completed → ongoing', log.detail)
+        self.assertIn('classes_total 24 → 28', log.detail)
+
+        # The trainer can now mark the 25th class — previously blocked forever by
+        # AttendanceSerializer.validate_enrollment() rejecting a 'completed' enrollment.
+        attendance_request = self.factory.post('/api/attendance/', {
+            'enrollment': enrollment.id, 'date': '2026-02-01', 'topic_covered': 'Class 25', 'status': 'present',
+        }, format='json')
+        force_authenticate(attendance_request, user=self.trainer.user)
+        attendance_response = AttendanceViewSet.as_view({'post': 'create'})(attendance_request)
+        self.assertEqual(attendance_response.status_code, 201, attendance_response.data)
+
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.classes_completed, 25)
+        self.assertEqual(enrollment.status, 'ongoing')
+
+    def test_lowering_classes_total_while_still_at_or_above_classes_completed_stays_completed(self):
+        # Constructed directly (not a normally-reachable state) to exercise the "should
+        # stay completed" branch specifically: classes_completed already meets the new,
+        # lower classes_total, so the edit must not disturb status.
+        enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer, status='completed',
+            classes_completed=24, classes_total=28,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+
+        response = self._patch_classes_total(enrollment, 24)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.status, 'completed')
+        self.assertEqual(enrollment.classes_total, 24)
+        self.assertFalse(AuditLog.objects.filter(action='enrollment_status_change').exists())

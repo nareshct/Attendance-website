@@ -735,23 +735,27 @@ export default function EnrollmentsPage() {
                 <td className="px-4 py-3"><Badge status={e.status} /></td>
                 <td className="px-4 py-3">{formatDate(e.start_date)}</td>
                 <td className="px-4 py-3 text-right">
-                  {e.status === 'ongoing' && (
+                  {(e.status === 'ongoing' || e.status === 'completed') && (
                     <div className="space-y-1">
                       <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
                         <button onClick={() => openEditSchedule(e)} className="text-brand-blue hover:underline whitespace-nowrap">
                           Edit
                         </button>
-                        <button onClick={() => openTransfer(e.id)} className="text-brand-blue hover:underline whitespace-nowrap">
-                          Transfer
-                        </button>
-                        <button onClick={() => openSubstitute(e.id)} className="text-brand-blue hover:underline whitespace-nowrap">
-                          Substitute
-                        </button>
-                        <button onClick={() => openWithdraw(e.id)} className="text-red-600 hover:underline whitespace-nowrap">
-                          Withdraw
-                        </button>
+                        {e.status === 'ongoing' && (
+                          <>
+                            <button onClick={() => openTransfer(e.id)} className="text-brand-blue hover:underline whitespace-nowrap">
+                              Transfer
+                            </button>
+                            <button onClick={() => openSubstitute(e.id)} className="text-brand-blue hover:underline whitespace-nowrap">
+                              Substitute
+                            </button>
+                            <button onClick={() => openWithdraw(e.id)} className="text-red-600 hover:underline whitespace-nowrap">
+                              Withdraw
+                            </button>
+                          </>
+                        )}
                       </div>
-                      {substituteAssignments.filter((sa) => sa.enrollment === e.id).map((sa) => (
+                      {e.status === 'ongoing' && substituteAssignments.filter((sa) => sa.enrollment === e.id).map((sa) => (
                         <div key={sa.id} className="text-xs text-gray-400">
                           {sa.substitute_trainer_name} covering {formatDateRange(sa.start_date, sa.end_date)}
                           {' · '}

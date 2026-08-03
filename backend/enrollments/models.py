@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -29,6 +31,33 @@ class Enrollment(models.Model):
 
     def __str__(self):
         return f'{self.student.name} — {self.course.name} (batch {self.batch_number})'
+
+    def sync_completion_status(self):
+        """Flip status between 'ongoing' and 'completed' to match classes_completed vs
+        classes_total. Never touches a withdrawn enrollment — withdrawal is terminal.
+
+        Shared by both sides of that comparison changing: classes_completed (see
+        attendance/views.py's perform_create/perform_destroy and
+        AttendanceRequestViewSet.approve) and classes_total (see
+        enrollments/services.py's sync_enrollment_status_after_classes_total_change —
+        e.g. extending an already-completed enrollment's batch count reopens it so the
+        trainer can mark the newly added classes).
+
+        Returns the enrollment's previous status if it changed, else None.
+        """
+        if self.status == 'withdrawn':
+            return None
+        if self.classes_completed >= self.classes_total and self.status != 'completed':
+            old_status = self.status
+            self.status = 'completed'
+            self.save(update_fields=['status'])
+            return old_status
+        if self.classes_completed < self.classes_total and self.status == 'completed':
+            old_status = self.status
+            self.status = 'ongoing'
+            self.save(update_fields=['status'])
+            return old_status
+        return None
 
 
 class SubstituteAssignment(models.Model):
@@ -84,6 +113,13 @@ class PaymentPlan(models.Model):
     enrollment = models.OneToOneField(Enrollment, on_delete=models.CASCADE, related_name='payment_plan')
     plan_type = models.CharField(max_length=20, choices=PLAN_CHOICES)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    # The discount percent (0-15, see EnrollmentSerializer.discount_percent) applied when
+    # total_amount was last computed — persisted so a later classes_total edit can reprice
+    # with total_amount_for_discount() using the exact same discount, rather than guessing
+    # it back from the stored total_amount. See services.recalculate_payment_plan().
+    discount_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0.00'), validators=[MinValueValidator(0)],
+    )
     # Set when the enrollment is withdrawn with a refund — see EnrollmentViewSet.withdraw().
     refunded_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
     refund_note = models.TextField(blank=True, default='')

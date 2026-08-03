@@ -1,10 +1,18 @@
 from decimal import Decimal
 
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
 from .models import DAYS_OF_WEEK, Enrollment, PaymentInstallment, PaymentPlan, SubstituteAssignment
-from .services import create_payment_plan, find_schedule_conflict, total_amount_for_discount, upfront_payment_for
+from .services import (
+    create_payment_plan,
+    find_schedule_conflict,
+    recalculate_payment_plan,
+    sync_enrollment_status_after_classes_total_change,
+    total_amount_for_discount,
+    upfront_payment_for,
+)
 
 
 class SubstituteAssignmentSerializer(serializers.ModelSerializer):
@@ -186,7 +194,7 @@ class EnrollmentSerializer(serializers.ModelSerializer):
 
         if payment_type:
             total_amount = total_amount_for_discount(enrollment.course, enrollment.classes_total, discount_percent)
-            create_payment_plan(enrollment, payment_type, total_amount)
+            create_payment_plan(enrollment, payment_type, total_amount, discount_percent)
 
         return enrollment
 
@@ -194,4 +202,17 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         new_course = validated_data.get('course')
         if new_course and new_course != instance.course:
             validated_data.setdefault('classes_total', new_course.total_classes)
+
+        new_classes_total = validated_data.get('classes_total')
+        if new_classes_total is not None and new_classes_total != instance.classes_total:
+            old_classes_total = instance.classes_total
+            plan = getattr(instance, 'payment_plan', None)
+            user = self.context['request'].user
+            with transaction.atomic():
+                if plan is not None:
+                    recalculate_payment_plan(plan, new_course or instance.course, new_classes_total, user)
+                updated = super().update(instance, validated_data)
+                sync_enrollment_status_after_classes_total_change(updated, old_classes_total, new_classes_total, user)
+                return updated
+
         return super().update(instance, validated_data)

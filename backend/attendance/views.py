@@ -108,9 +108,7 @@ class AttendanceViewSet(ModelViewSet):
         enrollment.classes_completed = F('classes_completed') + 1
         enrollment.save(update_fields=['classes_completed'])
         enrollment.refresh_from_db(fields=['classes_completed'])
-        if enrollment.classes_completed >= enrollment.classes_total:
-            enrollment.status = 'completed'
-            enrollment.save(update_fields=['status'])
+        enrollment.sync_completion_status()
 
     def perform_update(self, serializer):
         attendance = serializer.instance
@@ -157,9 +155,7 @@ class AttendanceViewSet(ModelViewSet):
             enrollment.classes_completed = Greatest(F('classes_completed') - 1, 0)
             enrollment.save(update_fields=['classes_completed'])
             enrollment.refresh_from_db(fields=['classes_completed'])
-            if enrollment.status == 'completed' and enrollment.classes_completed < enrollment.classes_total:
-                enrollment.status = 'ongoing'
-                enrollment.save(update_fields=['status'])
+            enrollment.sync_completion_status()
 
 
 class AttendanceRequestViewSet(ReadOnlyModelViewSet):
@@ -195,9 +191,7 @@ class AttendanceRequestViewSet(ReadOnlyModelViewSet):
             enrollment.classes_completed = F('classes_completed') + 1
             enrollment.save(update_fields=['classes_completed'])
             enrollment.refresh_from_db(fields=['classes_completed'])
-            if enrollment.classes_completed >= enrollment.classes_total:
-                enrollment.status = 'completed'
-                enrollment.save(update_fields=['status'])
+            enrollment.sync_completion_status()
 
             req.status = 'approved'
             req.attendance = attendance
