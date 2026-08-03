@@ -3,7 +3,8 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import Count, Sum
+from django.db.models import Count, OuterRef, Subquery, Sum
+from django.db.models.functions import Coalesce
 
 from attendance.models import Attendance
 from clients.models import Client
@@ -601,3 +602,27 @@ def compute_admin_alerts():
         'overdue_invoices': overdue_invoices,
         'due_installments': due_installments,
     }
+
+
+def payouts_with_carried_forward(queryset):
+    """Annotate a Payout queryset with `carried_forward_amount_annotated` — the sum of
+    PayoutAdjustment amounts already assigned to each row's own (trainer, cycle) pair —
+    as a single correlated subquery instead of one query per row. See
+    PayoutSerializer.get_carried_forward_amount(), which prefers this annotation when
+    present and falls back to a live per-object query otherwise.
+    """
+    adjustments = (
+        PayoutAdjustment.objects.filter(trainer=OuterRef('trainer'), applied_cycle=OuterRef('cycle'))
+        .values('trainer', 'applied_cycle').annotate(total=Sum('amount')).values('total')
+    )
+    return queryset.annotate(carried_forward_amount_annotated=Coalesce(Subquery(adjustments), Decimal('0.00')))
+
+
+def client_invoices_with_carried_forward(queryset):
+    """Same as payouts_with_carried_forward(), for ClientInvoice/ClientInvoiceAdjustment —
+    see ClientInvoiceSerializer.get_carried_forward_amount()."""
+    adjustments = (
+        ClientInvoiceAdjustment.objects.filter(client=OuterRef('client'), applied_cycle=OuterRef('cycle'))
+        .values('client', 'applied_cycle').annotate(total=Sum('amount')).values('total')
+    )
+    return queryset.annotate(carried_forward_amount_annotated=Coalesce(Subquery(adjustments), Decimal('0.00')))

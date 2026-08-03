@@ -135,7 +135,11 @@ class StudentViewSet(ModelViewSet):
     @action(detail=True, methods=['get'])
     def profile(self, request, pk=None):
         student = self.get_object()
-        enrollments = student.enrollments.select_related('course', 'trainer').order_by('-start_date')
+        enrollments = (
+            student.enrollments.select_related('course', 'trainer', 'payment_plan')
+            .prefetch_related('payment_plan__installments')
+            .order_by('-start_date')
+        )
 
         user = request.user
         if not user.is_staff:
@@ -145,7 +149,7 @@ class StudentViewSet(ModelViewSet):
             ).values_list('enrollment_id', flat=True)
             enrollments = enrollments.filter(
                 Q(trainer=user.trainer) | Q(id__in=substitute_enrollment_ids)
-            ).select_related('payment_plan').prefetch_related('payment_plan__installments')
+            )
             visible = [(e, trainer_payment_gate(e)) for e in enrollments]
             visible = [(e, gate) for e, gate in visible if gate != 'hidden']
             if not visible:

@@ -29,7 +29,16 @@ class PayoutSerializer(serializers.ModelSerializer):
 
     def get_carried_forward_amount(self, obj):
         """How much of this payout's amount was carried forward from a late-approved
-        class in an earlier, already-paid cycle (rather than earned in this cycle)."""
+        class in an earlier, already-paid cycle (rather than earned in this cycle).
+
+        Prefers the queryset annotation (see billing.services.payouts_with_carried_forward,
+        used by PayoutViewSet/MyEarningsView) when present, to avoid a query per row on a
+        list endpoint — falls back to a live query for a single already-fetched instance
+        that wasn't annotated (e.g. PayoutViewSet.mark_paid()).
+        """
+        annotated = getattr(obj, 'carried_forward_amount_annotated', None)
+        if annotated is not None:
+            return annotated
         total = PayoutAdjustment.objects.filter(
             trainer=obj.trainer, applied_cycle=obj.cycle,
         ).aggregate(total=Sum('amount'))['total']
@@ -56,7 +65,16 @@ class ClientInvoiceSerializer(serializers.ModelSerializer):
 
     def get_carried_forward_amount(self, obj):
         """How much of this invoice's amount was carried forward from a late-approved
-        class whose own cycle had already been invoiced to the client."""
+        class whose own cycle had already been invoiced to the client.
+
+        Prefers the queryset annotation (see billing.services.client_invoices_with_carried_forward,
+        used by ClientInvoiceViewSet) when present, to avoid a query per row on a list
+        endpoint — falls back to a live query for a single already-fetched instance that
+        wasn't annotated (e.g. ClientInvoiceViewSet.mark_received()).
+        """
+        annotated = getattr(obj, 'carried_forward_amount_annotated', None)
+        if annotated is not None:
+            return annotated
         total = ClientInvoiceAdjustment.objects.filter(
             client=obj.client, applied_cycle=obj.cycle,
         ).aggregate(total=Sum('amount'))['total']

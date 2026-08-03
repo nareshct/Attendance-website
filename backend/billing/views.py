@@ -16,11 +16,13 @@ from .serializers import BillingCycleSerializer, ClientInvoiceSerializer, Payout
 from .services import (
     calculate_client_invoices_for_cycle,
     calculate_payouts_for_cycle,
+    client_invoices_with_carried_forward,
     compute_admin_alerts,
     current_cycle_summary,
     current_payouts_for_cycle,
     cycle_revenue_totals,
     get_or_create_cycle,
+    payouts_with_carried_forward,
     snapshot_cycle_revenue,
 )
 
@@ -72,7 +74,7 @@ class ClientInvoiceViewSet(ReadOnlyModelViewSet):
             qs = qs.filter(client_id=client_id)
         if cycle_id:
             qs = qs.filter(cycle_id=cycle_id)
-        return qs
+        return client_invoices_with_carried_forward(qs)
 
     @action(detail=True, methods=['post'])
     def mark_received(self, request, pk=None):
@@ -111,7 +113,7 @@ class PayoutViewSet(ReadOnlyModelViewSet):
             qs = qs.filter(trainer_id=trainer_id)
         if cycle_id:
             qs = qs.filter(cycle_id=cycle_id)
-        return qs
+        return payouts_with_carried_forward(qs)
 
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
@@ -132,13 +134,13 @@ class MyEarningsView(ListAPIView):
     permission_classes = [IsTrainer]
 
     def get_queryset(self):
-        qs = Payout.objects.select_related('cycle').filter(
+        qs = Payout.objects.select_related('cycle', 'trainer').filter(
             trainer=self.request.user.trainer
         ).order_by('-cycle__cycle_start')
         cycle_id = self.request.query_params.get('cycle')
         if cycle_id:
             qs = qs.filter(cycle_id=cycle_id)
-        return qs
+        return payouts_with_carried_forward(qs)
 
 
 class CycleRevenueView(APIView):
