@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { requestPasswordReset } from '../api/client'
+import { Button } from '../components/Button'
 import { useAuth } from '../hooks/useAuth'
 
 export default function LoginPage() {
@@ -55,7 +56,7 @@ export default function LoginPage() {
       <div className="min-h-screen flex items-center justify-center bg-navy px-4">
         <div className="w-full max-w-sm bg-white rounded-xl shadow-xl p-8">
           <h1 className="text-2xl font-semibold text-navy mb-1">Reset your password</h1>
-          <p className="text-sm text-gray-500 mb-6">
+          <p className="text-sm text-text-secondary mb-6">
             Enter your username and, if there's an email on file for it, we'll send a reset link.
           </p>
 
@@ -71,20 +72,16 @@ export default function LoginPage() {
                 value={resetUsername}
                 onChange={(e) => setResetUsername(e.target.value)}
                 required
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue"
+                className="input"
               />
             </div>
 
-            {resetError && <p className="text-sm text-red-600">{resetError}</p>}
-            {resetMessage && <p className="text-sm text-brand-green">{resetMessage}</p>}
+            {resetError && <p className="text-sm text-error">{resetError}</p>}
+            {resetMessage && <p className="text-sm text-success">{resetMessage}</p>}
 
-            <button
-              type="submit"
-              disabled={resetSubmitting}
-              className="w-full rounded-lg bg-brand-blue text-white font-medium py-2 hover:bg-blue-800 transition-colors disabled:opacity-60"
-            >
+            <Button type="submit" disabled={resetSubmitting} className="w-full">
               {resetSubmitting ? 'Sending…' : 'Send reset link'}
-            </button>
+            </Button>
           </form>
 
           <button
@@ -94,7 +91,7 @@ export default function LoginPage() {
               setResetError('')
               setResetMessage('')
             }}
-            className="text-xs text-gray-400 hover:text-brand-blue mt-6 block mx-auto"
+            className="text-xs text-text-secondary hover:text-primary mt-6 block mx-auto px-1 py-0.5 focus-ring"
           >
             &larr; Back to sign in
           </button>
@@ -107,7 +104,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-navy px-4">
       <div className="w-full max-w-sm bg-white rounded-xl shadow-xl p-8">
         <h1 className="text-2xl font-semibold text-navy mb-1">Apex Binary</h1>
-        <p className="text-sm text-gray-500 mb-6">Sign in to manage attendance and payouts</p>
+        <p className="text-sm text-text-secondary mb-6">Sign in to manage attendance and payouts</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -121,7 +118,7 @@ export default function LoginPage() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue"
+              className="input"
             />
           </div>
 
@@ -136,29 +133,25 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue"
+              className="input"
             />
             <button
               type="button"
               onClick={() => setShowForgot(true)}
-              className="text-xs text-brand-blue hover:underline mt-1"
+              className="text-xs font-medium text-primary hover:underline mt-1.5 px-1 py-0.5 focus-ring"
             >
               Forgot password?
             </button>
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-error">{error}</p>}
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded-lg bg-brand-blue text-white font-medium py-2 hover:bg-blue-800 transition-colors disabled:opacity-60"
-          >
+          <Button type="submit" disabled={submitting} className="w-full">
             {submitting ? 'Signing in…' : 'Sign in'}
-          </button>
+          </Button>
         </form>
 
-        <p className="text-xs text-gray-400 mt-6 text-center">
+        <p className="text-xs text-text-tertiary mt-6 text-center">
           Admins and trainers use the same sign-in — you'll land on the right dashboard automatically.
         </p>
       </div>

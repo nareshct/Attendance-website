@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { downloadFile } from '../../api/client'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
@@ -91,22 +92,20 @@ export default function PayoutsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-navy">Payouts</h1>
-        <button disabled={busy} onClick={handleGenerateCurrent} className="text-sm rounded-lg bg-brand-blue text-white px-4 py-2 hover:bg-blue-800 disabled:opacity-60">
-          Generate current cycle
-        </button>
+        <Button disabled={busy} onClick={handleGenerateCurrent}>Generate current cycle</Button>
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-navy">Billing cycles &amp; payouts</h2>
         <div className="flex items-center gap-4">
           {cycles.length > 3 && (
-            <button onClick={() => setShowAllCycles((v) => !v)} className="text-xs text-brand-blue hover:underline">
+            <button onClick={() => setShowAllCycles((v) => !v)} className="text-xs font-medium text-primary hover:underline focus-ring">
               {showAllCycles ? 'Show recent only' : `Show all (${cycles.length})`}
             </button>
           )}
-          <button disabled={busy} onClick={handleExport} className="text-xs text-brand-blue hover:underline disabled:opacity-60">
+          <button disabled={busy} onClick={handleExport} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
             Export CSV
           </button>
         </div>
@@ -117,43 +116,43 @@ export default function PayoutsPage() {
         const cyclePayouts = isOpen ? (currentPayouts[c.id] || []) : payouts.filter((p) => p.cycle === c.id)
         return (
           <Card key={c.id} className="p-0 overflow-hidden mb-6">
-            <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+            <div className="flex items-center justify-between px-4 py-3 bg-surface-sunken border-b border-gray-100">
               <div className="flex items-center gap-3">
                 <span className="font-medium text-navy">{formatDateRange(c.cycle_start, c.cycle_end)}</span>
                 <Badge status={c.status} />
-                {isOpen && <span className="text-xs text-gray-400">Live totals — updates as attendance is marked</span>}
+                {isOpen && <span className="text-xs text-text-tertiary">Live totals — updates as attendance is marked</span>}
               </div>
               {isOpen && (
-                <button disabled={busy} onClick={() => handleClose(c.id)} className="text-xs text-brand-green hover:underline disabled:opacity-60">
+                <button disabled={busy} onClick={() => handleClose(c.id)} className="text-xs font-medium text-success hover:underline disabled:opacity-60 focus-ring">
                   Close &amp; calculate payouts
                 </button>
               )}
             </div>
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500 text-left">
+            <table className="table">
+              <thead className="table-head-row">
                 <tr>
-                  <th className="px-4 py-3">Trainer</th>
-                  <th className="px-4 py-3">Classes</th>
-                  <th className="px-4 py-3">Amount</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3"></th>
+                  <th className="table-head-cell">Trainer</th>
+                  <th className="table-head-cell">Classes</th>
+                  <th className="table-head-cell">Amount</th>
+                  <th className="table-head-cell">Status</th>
+                  <th className="table-head-cell"></th>
                 </tr>
               </thead>
               <tbody>
                 {cyclePayouts.map((p) => (
-                  <tr key={isOpen ? p.trainer : p.id} className="border-t border-gray-100">
-                    <td className="px-4 py-3">{p.trainer_name}</td>
-                    <td className="px-4 py-3">{p.total_classes}</td>
-                    <td className="px-4 py-3">
+                  <tr key={isOpen ? p.trainer : p.id} className="table-row">
+                    <td className="table-cell">{p.trainer_name}</td>
+                    <td className="table-cell tabular-nums">{p.total_classes}</td>
+                    <td className="table-cell tabular-nums">
                       ₹{p.total_amount}
                       {Number(p.carried_forward_amount) > 0 && (
-                        <div className="text-xs text-gray-400">(incl. ₹{p.carried_forward_amount} carried forward)</div>
+                        <div className="text-xs text-text-tertiary">(incl. ₹{p.carried_forward_amount} carried forward)</div>
                       )}
                     </td>
-                    <td className="px-4 py-3">{isOpen ? <Badge status="open" /> : <Badge status={p.paid_status} />}</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="table-cell">{isOpen ? <Badge status="open" /> : <Badge status={p.paid_status} />}</td>
+                    <td className="table-cell text-right">
                       {!isOpen && p.paid_status === 'pending' && (
-                        <button disabled={busy} onClick={() => handleMarkPaid(p.id)} className="text-xs text-brand-blue hover:underline disabled:opacity-60">
+                        <button disabled={busy} onClick={() => handleMarkPaid(p.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
                           Mark as paid
                         </button>
                       )}
@@ -161,7 +160,7 @@ export default function PayoutsPage() {
                   </tr>
                 ))}
                 {cyclePayouts.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">
                     {isOpen ? 'No attendance marked yet in this cycle.' : 'No payouts for this cycle.'}
                   </td></tr>
                 )}
@@ -171,7 +170,7 @@ export default function PayoutsPage() {
         )
       })}
       {cycles.length === 0 && (
-        <Card className="p-6 text-center text-gray-400">No billing cycles yet.</Card>
+        <Card className="p-6 text-center text-text-tertiary">No billing cycles yet.</Card>
       )}
     </div>
   )

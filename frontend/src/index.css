@@ -1,25 +1,173 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens — single source of truth for color, type, and the small
+ * set of shared component classes (.input etc). New component code should
+ * use the canonical names (primary/success/warning/error/info/teal).
+ *
+ * The five brand-* / navy names below are legacy aliases: 19 existing pages
+ * still reference bg-brand-blue / text-navy / bg-brand-violet / etc.
+ * directly and haven't been migrated to the new components yet (that's
+ * Step 3). Pointing those names at the new palette re-themes every
+ * existing page immediately, for free, without editing them. One
+ * transitional rough edge: a few pages hardcode `hover:bg-blue-800`
+ * (stock Tailwind, not a token) for button hovers — those will show the
+ * old vivid blue on hover until Step 3 replaces them with <Button>.
+ *
+ * Palette direction: one confident indigo primary, a cool slate neutral
+ * (not warm gray), four muted semantic colors, a deep teal reserved for
+ * the trainer nav rail only. Every text/fill pairing here is checked at
+ * >=4.5:1 (AA) — see the approved style tile for the full contrast table.
+ */
 @theme {
-  --color-navy: #0f172a;
-  --color-brand-blue: #1d4ed8;
-  --color-brand-violet: #6d28d9;
-  --color-brand-amber: #b45309;
-  --color-brand-green: #15803d;
+  /* --- Brand --- */
+  --color-navy: #0f172a; /* heading ink, admin sidebar base — unchanged */
+
+  --color-primary: #4338ca; /* actions, links, focus rings — 9.9:1 on white */
+  --color-primary-hover: #3730a3;
+  --color-primary-active: #312e81;
+  --color-primary-tint: #eef2ff; /* selected row, focus glow, subtle highlight */
+  --color-primary-tint-border: #c7d2fe;
+
+  --color-teal: #0f5c56; /* trainer nav rail only — keeps the two roles unmistakable */
+  --color-teal-hover: #0c4a45;
+  --color-teal-tint: #e9f5f3;
+
+  /* --- Semantic status ---
+     success = present/paid/completed/approved, warning = pending/open/
+     incomplete, error = overdue/rejected/absent/denied/cancelled,
+     info = neutral/closed states. */
+  --color-success: #176b41;
+  --color-success-hover: #145c38;
+  --color-success-tint: #eaf7f0;
+  --color-success-tint-border: #cfebdd;
+
+  --color-warning: #8a5900;
+  --color-warning-hover: #6e4700;
+  --color-warning-tint: #fcf3e1;
+  --color-warning-tint-border: #f3e0b8;
+
+  --color-error: #b23a34;
+  --color-error-hover: #962d28;
+  --color-error-tint: #fbeae9;
+  --color-error-tint-border: #f3cfcb;
+
+  --color-info: #2e6ca4;
+  --color-info-hover: #24547f;
+  --color-info-tint: #e9f1f8;
+  --color-info-tint-border: #c9deee;
+
+  /* --- Legacy aliases (existing pages, unmigrated until Step 3) --- */
+  --color-brand-blue: var(--color-primary);
+  --color-brand-green: var(--color-success);
+  --color-brand-amber: var(--color-warning);
+  --color-brand-violet: var(--color-teal);
+
+  /* --- Neutral surfaces ---
+     Text/border/background still mostly use Tailwind's built-in gray-*
+     scale (already a restrained cool gray). These name the *roles*:
+       text-tertiary  — decorative meta only (timestamps, "optional" captions).
+                        2.5:1 on white — never use for anything a user must read.
+       text-secondary — everything else that isn't a heading, incl. disabled
+                        field values, hints, captions that carry information.
+                        4.8:1 on white. */
+  --color-surface-sunken: #f1f5f9; /* = gray-50/100 range, table headers, disabled fields */
+  --color-text-secondary: #64748b; /* = gray-500, 4.8:1 */
+  --color-text-tertiary: #94a3b8; /* = gray-400, 2.5:1 — decorative only */
+
+  /* --- Elevation ---
+     Layered, navy-tinted shadows instead of flat black — reads softer,
+     closer to Stripe/Linear than a default browser drop-shadow. */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 8px -2px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 12px 24px -6px rgba(15, 23, 42, 0.12), 0 4px 8px -4px rgba(15, 23, 42, 0.06);
+  --shadow-xl: 0 24px 48px -12px rgba(15, 23, 42, 0.18), 0 8px 16px -8px rgba(15, 23, 42, 0.08);
+
+  /* --- Type --- */
+  --font-sans:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+
+/*
+ * Radius scale — Tailwind's default scale already matches the approved
+ * proposal exactly, no override needed:
+ *   rounded-md (6px)  — chips, small inline controls
+ *   rounded-lg (8px)  — buttons, inputs, nav items
+ *   rounded-xl (12px) — cards, table shell, dropdown panels
+ *   rounded-2xl (16px)— modals
+ *   rounded-full      — badges, avatars
+ *
+ * Type scale (apply as pages migrate in Step 3):
+ *   Display (rare, hero stat):  text-[32px] font-bold
+ *   H1 page title:              text-2xl (26px target) font-semibold
+ *   H2 section:                 text-lg font-semibold
+ *   H3 card title:               text-[15px] font-semibold
+ *   Body:                       text-sm font-normal, text-slate-700
+ *   Label:                      text-sm font-medium
+ *   Meta:                       text-xs font-medium, text-secondary
+ *   Micro (decorative only):    text-xs font-medium, text-tertiary
+ * Weight discipline: 600 for headings, 500 for nav/emphasis/labels, 400
+ * for body — 700 reserved for the rare hero number.
+ *
+ * Spacing: standard Tailwind 4px scale. Card padding moves to p-6 (24px,
+ * up from the old p-5/20px) for more confident whitespace; table cells
+ * use px-4 py-3.5 (16px/14px, up from py-3/12px) for a less cramped row.
+ */
 
 body {
   margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv11', 'ss01';
+  color: var(--color-navy);
+  background: #f8fafc;
 }
 
 @layer components {
   .input {
-    @apply w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue;
+    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-navy placeholder:text-gray-400 transition-[border-color,box-shadow] duration-150 ease-out focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary-tint disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-surface-sunken disabled:text-text-secondary;
+  }
+
+  /* Compact variant for tighter contexts (nav search bars, inline filters). */
+  .input-sm {
+    @apply px-3 py-1.5 text-sm;
+  }
+
+  /* Apply alongside .input when a field has failed validation. */
+  .input-error {
+    @apply border-error focus:border-error focus:ring-error-tint;
+  }
+
+  /*
+   * Lightweight text-link actions (table row actions, modal "Cancel" links,
+   * pagination) intentionally stay plain links rather than full <Button>s —
+   * but still need the same designed focus-visible ring as every other
+   * interactive element, not the browser default (or nothing at all, which
+   * is what most of these had before).
+   */
+  .focus-ring {
+    @apply rounded transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2;
+  }
+
+  /*
+   * Table pattern, ready to adopt page-by-page in Step 3:
+   *   <table className="table">
+   *     <thead><tr className="table-head-row"><th className="table-head-cell">...
+   *     <tbody><tr className="table-row"><td className="table-cell">...
+   */
+  .table {
+    @apply w-full text-sm;
+  }
+  .table-head-row {
+    @apply bg-surface-sunken text-left;
+  }
+  .table-head-cell {
+    @apply px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary;
+  }
+  .table-row {
+    @apply border-t border-gray-100 transition-colors duration-150 ease-out hover:bg-surface-sunken;
+  }
+  .table-cell {
+    @apply px-4 py-3.5 text-gray-700;
   }
 }

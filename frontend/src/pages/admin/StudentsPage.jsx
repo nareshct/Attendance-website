@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
 import { SearchableSelect } from '../../components/SearchableSelect'
@@ -118,15 +119,10 @@ export default function StudentsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-navy">Students</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="text-sm rounded-lg bg-brand-blue text-white px-4 py-2 hover:bg-blue-800"
-        >
-          + Add student
-        </button>
+        <Button onClick={() => setShowForm(true)}>+ Add student</Button>
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add student" maxWidthClass="max-w-2xl">
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -153,22 +149,22 @@ export default function StudentsPage() {
             </select>
           )}
 
-          <p className="sm:col-span-2 text-xs text-gray-400 -mb-1">Optional — parent details</p>
+          <p className="sm:col-span-2 text-xs text-text-tertiary -mb-1">Optional — parent details</p>
           <input maxLength={255} placeholder="Parent name" value={form.parent_name} onChange={(e) => setForm({ ...form, parent_name: e.target.value })} className="input" />
           <input maxLength={20} placeholder="Parent phone" value={form.parent_phone_number} onChange={(e) => setForm({ ...form, parent_phone_number: e.target.value })} className="input" />
           <input maxLength={255} placeholder="Place" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} className="input" />
 
-          <p className="sm:col-span-2 text-xs text-gray-400 -mt-1">
+          <p className="sm:col-span-2 text-xs text-text-tertiary -mt-1">
             Course, trainer, schedule, and payment plan are set up next in Enrollments.
           </p>
-          {error && <p className="sm:col-span-2 text-red-600 text-xs">{error}</p>}
+          {error && <p className="sm:col-span-2 text-error text-xs">{error}</p>}
           <div className="sm:col-span-2 flex justify-end gap-3">
-            <button type="button" onClick={() => setShowForm(false)} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>
               Cancel
-            </button>
-            <button disabled={submitting} type="submit" className="rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800 disabled:opacity-60">
+            </Button>
+            <Button type="submit" variant="success" disabled={submitting}>
               {submitting ? 'Saving…' : 'Save student'}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
@@ -182,15 +178,9 @@ export default function StudentsPage() {
         />
         <div className="flex gap-2 shrink-0">
           {['active', 'archived'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setStatusTab(t)}
-              className={`text-sm rounded-lg px-4 py-2 capitalize ${
-                statusTab === t ? 'bg-brand-blue text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
-            >
+            <Button key={t} variant={statusTab === t ? 'primary' : 'secondary'} className="capitalize" onClick={() => setStatusTab(t)}>
               {t}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
@@ -235,34 +225,34 @@ export default function StudentsPage() {
       </div>
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">#</th>
-              <th className="px-4 py-3">Student ID</th>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Client</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3"></th>
+              <th className="table-head-cell">#</th>
+              <th className="table-head-cell">Student ID</th>
+              <th className="table-head-cell">Name</th>
+              <th className="table-head-cell">Client</th>
+              <th className="table-head-cell">Status</th>
+              <th className="table-head-cell"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((s, i) => (
-              <tr key={s.id} className="border-t border-gray-100">
-                <td className="px-4 py-3 text-gray-400">{i + 1}</td>
-                <td className="px-4 py-3 font-mono text-xs">{s.student_id}</td>
-                <td className="px-4 py-3">
-                  <Link to={`/admin/students/${s.id}`} className="text-brand-blue hover:underline">{s.name}</Link>
+              <tr key={s.id} className="table-row">
+                <td className="table-cell text-text-tertiary">{i + 1}</td>
+                <td className="table-cell font-mono text-xs">{s.student_id}</td>
+                <td className="table-cell">
+                  <Link to={`/admin/students/${s.id}`} className="font-medium text-primary hover:underline focus-ring">{s.name}</Link>
                 </td>
-                <td className="px-4 py-3">{s.source_type === 'B2B' ? (s.client_name || '—') : 'Own'}</td>
-                <td className="px-4 py-3"><Badge status={s.status} /></td>
-                <td className="px-4 py-3 text-right">
+                <td className="table-cell">{s.source_type === 'B2B' ? (s.client_name || '—') : 'Own'}</td>
+                <td className="table-cell"><Badge status={s.status} /></td>
+                <td className="table-cell text-right">
                   {s.status === 'active' ? (
-                    <button onClick={() => handleArchive(s.id)} className="text-xs text-gray-500 hover:text-red-600">
+                    <button onClick={() => handleArchive(s.id)} className="text-xs text-text-secondary hover:text-error focus-ring">
                       Archive
                     </button>
                   ) : (
-                    <button onClick={() => handleUnarchive(s.id)} className="text-xs text-gray-500 hover:text-brand-green">
+                    <button onClick={() => handleUnarchive(s.id)} className="text-xs text-text-secondary hover:text-success focus-ring">
                       Unarchive
                     </button>
                   )}
@@ -270,10 +260,10 @@ export default function StudentsPage() {
               </tr>
             ))}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">No students found.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">No students found.</td></tr>
             )}
             {loading && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
             )}
           </tbody>
         </table>
@@ -281,13 +271,13 @@ export default function StudentsPage() {
 
       {!loading && students.length > 0 && (
         <div className="flex items-center justify-between mt-3">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-text-tertiary">
             Loaded {students.length} of {studentCount} students
             {hasMore && ' — search covers everyone; status and dropdown filters only apply to what\'s loaded'}
           </p>
           <div className="flex gap-4">
             {page > 1 && (
-              <button onClick={loadLess} className="text-xs text-brand-blue hover:underline">
+              <button onClick={loadLess} className="text-xs font-medium text-primary hover:underline focus-ring">
                 Load less
               </button>
             )}
@@ -295,7 +285,7 @@ export default function StudentsPage() {
               <button
                 disabled={loadingMore}
                 onClick={loadMore}
-                className="text-xs text-brand-blue hover:underline disabled:opacity-60"
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
               >
                 {loadingMore ? 'Loading…' : 'Load more'}
               </button>

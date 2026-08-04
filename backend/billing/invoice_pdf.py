@@ -13,10 +13,10 @@ from clients.services import client_course_breakdown
 
 from .models import ClientInvoiceAdjustment
 
-NAVY = colors.HexColor('#1e3a5f')
-GREY = colors.HexColor('#666666')
-LIGHT_GREY = colors.HexColor('#f3f4f6')
-LINE = colors.HexColor('#dddddd')
+NAVY = colors.HexColor('#0f172a')
+GREY = colors.HexColor('#64748b')
+LIGHT_GREY = colors.HexColor('#f1f5f9')
+LINE = colors.HexColor('#e2e8f0')
 
 
 def render_invoice_pdf(invoice):

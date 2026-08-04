@@ -60,24 +60,28 @@ export function Modal({ open, onClose, title, children, maxWidthClass = 'max-w-l
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:items-center">
-      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className="fixed inset-0 bg-navy/50" onClick={onClose} />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? 'modal-title' : undefined}
         tabIndex={-1}
-        className={`relative my-8 w-full ${maxWidthClass} rounded-xl bg-white shadow-lg`}
+        className={`relative my-8 w-full ${maxWidthClass} rounded-2xl bg-white shadow-xl`}
       >
         {title && (
-          <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-            <h3 id="modal-title" className="text-lg font-semibold text-navy">{title}</h3>
-            <button onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600">
+          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+            <h3 id="modal-title" className="text-base font-semibold text-navy">{title}</h3>
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="rounded-full p-1.5 text-text-secondary transition-colors duration-150 ease-out hover:bg-surface-sunken hover:text-navy focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+            >
               ✕
             </button>
           </div>
         )}
-        <div className="p-5">{children}</div>
+        <div className="p-6">{children}</div>
       </div>
     </div>
   )

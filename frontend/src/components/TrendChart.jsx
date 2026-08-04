@@ -104,7 +104,7 @@ export function TrendChart({ xLabels, series }) {
 
       <div className="flex gap-4 justify-center mt-2">
         {series.map((s) => (
-          <div key={s.label} className="flex items-center gap-1.5 text-xs text-gray-500">
+          <div key={s.label} className="flex items-center gap-1.5 text-xs text-text-secondary">
             <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }} />
             {s.label}
           </div>

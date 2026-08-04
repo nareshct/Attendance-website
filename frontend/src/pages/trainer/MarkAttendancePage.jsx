@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Modal } from '../../components/Modal'
@@ -190,7 +191,7 @@ export default function MarkAttendancePage() {
 
           <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="input" />
 
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-text-secondary">
             Only mark a class if you actually taught it. If a student didn't attend, just don't mark that date — there's no separate "absent" entry to make.
           </p>
 
@@ -203,12 +204,12 @@ export default function MarkAttendancePage() {
             rows={3}
           />
 
-          {error && <p className="text-red-600 text-sm">{error}</p>}
-          {success && <p className="text-brand-green text-sm">{success}</p>}
+          {error && <p className="text-error text-sm">{error}</p>}
+          {success && <p className="text-success text-sm">{success}</p>}
 
-          <button disabled={submitting} type="submit" className="rounded-lg bg-brand-violet text-white px-4 py-2 hover:bg-violet-800 disabled:opacity-60">
+          <Button type="submit" size="lg" disabled={submitting}>
             {submitting ? 'Saving…' : 'Mark class taken'}
-          </button>
+          </Button>
         </form>
       </Card>
 
@@ -216,24 +217,24 @@ export default function MarkAttendancePage() {
         <>
           <h2 className="text-lg font-semibold text-navy mb-3">Approval requests</h2>
           <Card className="p-0 overflow-x-auto mb-8">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500 text-left">
+            <table className="table">
+              <thead className="table-head-row">
                 <tr>
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Student</th>
-                  <th className="px-4 py-3">Course</th>
-                  <th className="px-4 py-3">Topic</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="table-head-cell">Date</th>
+                  <th className="table-head-cell">Student</th>
+                  <th className="table-head-cell">Course</th>
+                  <th className="table-head-cell">Topic</th>
+                  <th className="table-head-cell">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {requests.map((r) => (
-                  <tr key={r.id} className="border-t border-gray-100">
-                    <td className="px-4 py-3">{formatDate(r.date)}</td>
-                    <td className="px-4 py-3">{r.student_name}</td>
-                    <td className="px-4 py-3">{r.course_name}</td>
-                    <td className="px-4 py-3 text-gray-500">{r.topic_covered || '—'}</td>
-                    <td className="px-4 py-3"><Badge status={r.status} /></td>
+                  <tr key={r.id} className="table-row">
+                    <td className="table-cell">{formatDate(r.date)}</td>
+                    <td className="table-cell">{r.student_name}</td>
+                    <td className="table-cell">{r.course_name}</td>
+                    <td className="table-cell text-text-secondary">{r.topic_covered || '—'}</td>
+                    <td className="table-cell"><Badge status={r.status} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -243,42 +244,48 @@ export default function MarkAttendancePage() {
       )}
 
       <h2 className="text-lg font-semibold text-navy mb-1">Recent attendance</h2>
-      <p className="text-xs text-gray-400 mb-3">Showing the current and last billing cycle only.</p>
+      <p className="text-xs text-text-tertiary mb-3">Showing the current and last billing cycle only.</p>
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">#</th>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Student</th>
-              <th className="px-4 py-3">Course</th>
-              <th className="px-4 py-3">Topic</th>
-              <th className="px-4 py-3"></th>
+              <th className="table-head-cell">#</th>
+              <th className="table-head-cell">Date</th>
+              <th className="table-head-cell">Student</th>
+              <th className="table-head-cell">Course</th>
+              <th className="table-head-cell">Topic</th>
+              <th className="table-head-cell"></th>
             </tr>
           </thead>
           <tbody>
             {combinedHistory.map((h, i) => (
-              <tr key={h.id} className={`border-t border-gray-100 align-top ${h.denied ? 'opacity-60' : ''}`}>
-                <td className="px-4 py-3 text-gray-400">{i + 1}</td>
-                <td className="px-4 py-3">{formatDate(h.date)}</td>
-                <td className="px-4 py-3">{h.student_name}</td>
-                <td className="px-4 py-3">{h.course_name}</td>
-                <td className="px-4 py-3 text-gray-500">{h.topic_covered || '—'}</td>
-                <td className="px-4 py-3 whitespace-nowrap">
+              <tr key={h.id} className={`table-row align-top ${h.denied ? 'opacity-60' : ''}`}>
+                <td className="table-cell text-text-tertiary">{i + 1}</td>
+                <td className="table-cell">{formatDate(h.date)}</td>
+                <td className="table-cell">{h.student_name}</td>
+                <td className="table-cell">{h.course_name}</td>
+                <td className="table-cell text-text-secondary">{h.topic_covered || '—'}</td>
+                <td className="table-cell whitespace-nowrap">
                   {h.denied ? (
                     <Badge status="denied" />
                   ) : h.in_closed_cycle ? (
                     h.approved_via_request ? (
                       <Badge status="approved" />
                     ) : (
-                      <span className="text-xs text-gray-400">Locked</span>
+                      <span className="text-xs text-text-secondary">Locked</span>
                     )
                   ) : (
                     <div className="space-x-3">
-                      <button onClick={() => openEdit(h)} className="text-xs text-brand-blue hover:underline">
+                      <button
+                        onClick={() => openEdit(h)}
+                        className="rounded text-xs font-medium text-primary transition-colors duration-150 ease-out hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                      >
                         Edit
                       </button>
-                      <button onClick={() => openDelete(h.id)} className="text-xs text-red-600 hover:underline">
+                      <button
+                        onClick={() => openDelete(h.id)}
+                        className="rounded text-xs font-medium text-error transition-colors duration-150 ease-out hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-error focus-visible:ring-offset-2"
+                      >
                         Delete
                       </button>
                     </div>
@@ -287,7 +294,7 @@ export default function MarkAttendancePage() {
               </tr>
             ))}
             {combinedHistory.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">No attendance marked in the current or last billing cycle.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">No attendance marked in the current or last billing cycle.</td></tr>
             )}
           </tbody>
         </table>
@@ -303,18 +310,14 @@ export default function MarkAttendancePage() {
             className="input"
             rows={3}
           />
-          {editError && <p className="text-red-600 text-sm">{editError}</p>}
+          {editError && <p className="text-error text-sm">{editError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeEdit} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={closeEdit}>
               Cancel
-            </button>
-            <button
-              disabled={editSaving}
-              onClick={saveEdit}
-              className="text-sm rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800 disabled:opacity-60"
-            >
+            </Button>
+            <Button type="button" variant="success" disabled={editSaving} onClick={saveEdit}>
               {editSaving ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           </div>
         </div>
       </Modal>

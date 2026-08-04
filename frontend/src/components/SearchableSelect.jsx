@@ -53,8 +53,8 @@ export function SearchableSelect({ options, value, onChange, placeholder = 'Sear
         autoComplete="off"
       />
       {open && (
-        <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
-          {filtered.length === 0 && <div className="px-3 py-2 text-sm text-gray-400">No matches</div>}
+        <div className="absolute z-10 mt-1.5 w-full max-h-56 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-md">
+          {filtered.length === 0 && <div className="px-3 py-2 text-sm text-text-secondary">No matches</div>}
           {filtered.map((o) => (
             <button
               type="button"
@@ -64,7 +64,7 @@ export function SearchableSelect({ options, value, onChange, placeholder = 'Sear
                 setOpen(false)
                 setQuery('')
               }}
-              className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+              className="block w-full text-left px-3 py-2 text-sm text-navy transition-colors duration-150 ease-out hover:bg-primary-tint"
             >
               {o.label}
             </button>

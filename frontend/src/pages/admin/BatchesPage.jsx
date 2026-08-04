@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
 import { Card, StatCard } from '../../components/Card'
 import { Modal } from '../../components/Modal'
 import { SearchableSelect } from '../../components/SearchableSelect'
@@ -136,23 +137,19 @@ export default function BatchesPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-navy">Batches</h1>
         <div className="flex gap-2">
-          <button onClick={loadSourceBreakdown} className="text-sm rounded-lg border border-gray-200 text-gray-600 px-4 py-2 hover:bg-gray-50">
-            Revenue by source
-          </button>
-          <button onClick={() => setShowForm(true)} className="text-sm rounded-lg bg-brand-blue text-white px-4 py-2 hover:bg-blue-800">
-            + New batch
-          </button>
+          <Button variant="secondary" onClick={loadSourceBreakdown}>Revenue by source</Button>
+          <Button onClick={() => setShowForm(true)}>+ New batch</Button>
         </div>
       </div>
 
       <Modal open={showSourceBreakdown} onClose={() => setShowSourceBreakdown(false)} title="Revenue by source" maxWidthClass="max-w-2xl">
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="text-xs text-text-tertiary mb-3">
           Only covers guest sign-ups (walk-ins added by hand or imported from Excel) — a registered student added
           the normal way doesn't record how they heard about the center.
         </p>
         {sourceBreakdown ? (
           <table className="w-full text-sm">
-            <thead className="text-gray-500 text-left">
+            <thead className="text-text-secondary text-left">
               <tr>
                 <th className="py-1.5 pr-4">Source</th>
                 <th className="py-1.5 pr-4">Enrolled</th>
@@ -164,26 +161,26 @@ export default function BatchesPage() {
               {sourceBreakdown.map((row) => (
                 <tr key={row.source} className="border-t border-gray-100">
                   <td className="py-1.5 pr-4">{row.source}</td>
-                  <td className="py-1.5 pr-4">{row.enrolled_count}</td>
-                  <td className="py-1.5 pr-4 text-brand-green">₹{row.collected}</td>
-                  <td className="py-1.5 text-brand-amber">₹{row.pending}</td>
+                  <td className="py-1.5 pr-4 tabular-nums">{row.enrolled_count}</td>
+                  <td className="py-1.5 pr-4 text-success tabular-nums">₹{row.collected}</td>
+                  <td className="py-1.5 text-warning tabular-nums">₹{row.pending}</td>
                 </tr>
               ))}
               {sourceBreakdown.length === 0 && (
-                <tr><td colSpan={4} className="py-6 text-center text-gray-400">No guest sign-ups yet.</td></tr>
+                <tr><td colSpan={4} className="py-6 text-center text-text-tertiary">No guest sign-ups yet.</td></tr>
               )}
             </tbody>
           </table>
-        ) : <p className="text-sm text-gray-400">Loading…</p>}
+        ) : <p className="text-sm text-text-tertiary">Loading…</p>}
       </Modal>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Batches" value={summary ? summary.batch_count : '…'} accentClass="text-brand-blue" />
-        <StatCard label="Students enrolled" value={summary ? summary.total_students : '…'} accentClass="text-brand-blue" />
-        <StatCard label="Collected" value={summary ? `₹${summary.total_collected}` : '…'} accentClass="text-brand-green" />
-        <StatCard label="Pending" value={summary ? `₹${summary.total_pending}` : '…'} accentClass="text-brand-amber" />
+        <StatCard label="Batches" value={summary ? summary.batch_count : '…'} accentClass="text-navy" />
+        <StatCard label="Students enrolled" value={summary ? summary.total_students : '…'} accentClass="text-navy" />
+        <StatCard label="Collected" value={summary ? `₹${summary.total_collected}` : '…'} accentClass="text-success" />
+        <StatCard label="Pending" value={summary ? `₹${summary.total_pending}` : '…'} accentClass="text-warning" />
       </div>
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="New batch" maxWidthClass="max-w-2xl">
@@ -204,26 +201,23 @@ export default function BatchesPage() {
           <input required type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} className="input" />
           <input required type="time" value={form.class_time} onChange={(e) => setForm({ ...form, class_time: e.target.value })} className="input" />
           <div className="sm:col-span-2">
-            <p className="text-sm text-gray-500 mb-1">Class days</p>
+            <p className="text-sm text-text-secondary mb-1">Class days</p>
             <div className="flex flex-wrap gap-2">
               {DAY_OPTIONS.map((d) => (
-                <button
+                <Button
                   key={d.code}
                   type="button"
+                  size="sm"
+                  variant={form.class_days.includes(d.code) ? 'primary' : 'secondary'}
                   onClick={() => toggleDay(d.code)}
-                  className={`px-3 py-1.5 rounded-lg text-sm border ${
-                    form.class_days.includes(d.code)
-                      ? 'bg-brand-blue text-white border-brand-blue'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-brand-blue'
-                  }`}
                 >
                   {d.label}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
           <div className="sm:col-span-2">
-            <p className="text-sm text-gray-500 mb-1">
+            <p className="text-sm text-text-secondary mb-1">
               Trainers (optional — any name, not just registered trainers; any number, for split schedules or co-teaching)
             </p>
             <div className="flex gap-2 mb-2">
@@ -238,16 +232,16 @@ export default function BatchesPage() {
               <datalist id="batch-trainer-suggestions">
                 {trainers.map((t) => <option key={t.id} value={t.name} />)}
               </datalist>
-              <button type="button" onClick={addTrainerName} disabled={!trainerNameInput.trim()} className="text-sm text-brand-blue hover:underline disabled:opacity-60 shrink-0">
+              <button type="button" onClick={addTrainerName} disabled={!trainerNameInput.trim()} className="text-sm font-medium text-primary hover:underline disabled:opacity-60 shrink-0 focus-ring">
                 + Add
               </button>
             </div>
             {form.trainerNames.length > 0 && (
               <ul className="space-y-1">
                 {form.trainerNames.map((name) => (
-                  <li key={name} className="flex items-center justify-between text-sm bg-gray-50 rounded px-3 py-1.5">
+                  <li key={name} className="flex items-center justify-between text-sm bg-surface-sunken rounded px-3 py-1.5">
                     <span>{name}</span>
-                    <button type="button" onClick={() => removeTrainerName(name)} className="text-xs text-red-600 hover:underline">
+                    <button type="button" onClick={() => removeTrainerName(name)} className="text-xs font-medium text-error hover:underline focus-ring">
                       Remove
                     </button>
                   </li>
@@ -257,18 +251,18 @@ export default function BatchesPage() {
           </div>
           <input placeholder="Google Meet link (optional)" value={form.meet_link} onChange={(e) => setForm({ ...form, meet_link: e.target.value })} className="input sm:col-span-2" />
           <textarea placeholder="Description (optional)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="input sm:col-span-2" rows={2} />
-          <p className="sm:col-span-2 text-xs text-gray-400 -mt-1">
+          <p className="sm:col-span-2 text-xs text-text-tertiary -mt-1">
             Payouts for whoever runs this batch are added afterward, on the batch's own page — one per person.
           </p>
 
-          {error && <p className="sm:col-span-2 text-red-600 text-xs">{error}</p>}
+          {error && <p className="sm:col-span-2 text-error text-xs">{error}</p>}
           <div className="sm:col-span-2 flex justify-end gap-3">
-            <button type="button" onClick={() => setShowForm(false)} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>
               Cancel
-            </button>
-            <button disabled={submitting} type="submit" className="rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800 disabled:opacity-60">
+            </Button>
+            <Button type="submit" variant="success" disabled={submitting}>
               {submitting ? 'Saving…' : 'Save batch'}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
@@ -282,54 +276,48 @@ export default function BatchesPage() {
         />
         <div className="flex gap-2 shrink-0">
           {['ongoing', 'completed', 'cancelled'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setStatusTab(t)}
-              className={`text-sm rounded-lg px-4 py-2 capitalize ${
-                statusTab === t ? 'bg-brand-blue text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
-            >
+            <Button key={t} variant={statusTab === t ? 'primary' : 'secondary'} className="capitalize" onClick={() => setStatusTab(t)}>
               {t}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">Batch</th>
-              <th className="px-4 py-3">Course</th>
-              <th className="px-4 py-3">Schedule</th>
-              <th className="px-4 py-3">Trainers</th>
-              <th className="px-4 py-3">Fee/student</th>
-              <th className="px-4 py-3">Enrolled</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Started</th>
+              <th className="table-head-cell">Batch</th>
+              <th className="table-head-cell">Course</th>
+              <th className="table-head-cell">Schedule</th>
+              <th className="table-head-cell">Trainers</th>
+              <th className="table-head-cell">Fee/student</th>
+              <th className="table-head-cell">Enrolled</th>
+              <th className="table-head-cell">Status</th>
+              <th className="table-head-cell">Started</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((b) => (
-              <tr key={b.id} className="border-t border-gray-100">
-                <td className="px-4 py-3">
-                  <Link to={`/admin/batches/${b.id}`} className="text-brand-blue hover:underline">{b.name}</Link>
+              <tr key={b.id} className="table-row">
+                <td className="table-cell">
+                  <Link to={`/admin/batches/${b.id}`} className="font-medium text-primary hover:underline focus-ring">{b.name}</Link>
                 </td>
-                <td className="px-4 py-3">{b.course_name}</td>
-                <td className="px-4 py-3 text-gray-500">
+                <td className="table-cell">{b.course_name}</td>
+                <td className="table-cell text-text-secondary">
                   {formatDays(b.class_days)}{b.class_time && ` · ${formatTime(b.class_time)}`}
                 </td>
-                <td className="px-4 py-3 text-gray-500">
+                <td className="table-cell text-text-secondary">
                   {b.trainer_names ? b.trainer_names.split(',').filter(Boolean).join(', ') : '—'}
                 </td>
-                <td className="px-4 py-3">₹{b.fee_per_student}</td>
-                <td className="px-4 py-3">{b.enrolled_count}</td>
-                <td className="px-4 py-3"><Badge status={b.status} /></td>
-                <td className="px-4 py-3">{formatDate(b.start_date)}</td>
+                <td className="table-cell tabular-nums">₹{b.fee_per_student}</td>
+                <td className="table-cell tabular-nums">{b.enrolled_count}</td>
+                <td className="table-cell"><Badge status={b.status} /></td>
+                <td className="table-cell">{formatDate(b.start_date)}</td>
               </tr>
             ))}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400">No batches found.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-text-tertiary">No batches found.</td></tr>
             )}
           </tbody>
         </table>
@@ -337,13 +325,13 @@ export default function BatchesPage() {
 
       {!loading && batches.length > 0 && (
         <div className="flex items-center justify-between mt-3">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-text-tertiary">
             Loaded {batches.length} of {batchCount} batches
             {hasMore && ' — search covers everyone; status tab only applies to what\'s loaded'}
           </p>
           <div className="flex gap-4">
             {page > 1 && (
-              <button onClick={loadLess} className="text-xs text-brand-blue hover:underline">
+              <button onClick={loadLess} className="text-xs font-medium text-primary hover:underline focus-ring">
                 Load less
               </button>
             )}
@@ -351,7 +339,7 @@ export default function BatchesPage() {
               <button
                 disabled={loadingMore}
                 onClick={loadMore}
-                className="text-xs text-brand-blue hover:underline disabled:opacity-60"
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
               >
                 {loadingMore ? 'Loading…' : 'Load more'}
               </button>

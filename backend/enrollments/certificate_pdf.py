@@ -10,10 +10,14 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 COMPANY_NAME = 'Apex Binary'
 
-NAVY = colors.HexColor('#1e3a5f')
-NAVY_DARK = colors.HexColor('#152b47')
+NAVY = colors.HexColor('#0f172a')
+NAVY_DARK = colors.HexColor('#0a0f1c')
+# Gold + cream are a deliberate ceremonial pairing for a completion certificate —
+# kept distinct from the operational indigo/slate palette used everywhere else
+# (dashboard, reports, invoices), matching how certificates conventionally read
+# as formal documents rather than app screens.
 GOLD = colors.HexColor('#b8860b')
-GREY = colors.HexColor('#6b7280')
+GREY = colors.HexColor('#64748b')
 CREAM = colors.HexColor('#fdfbf5')
 BODY_INK = colors.HexColor('#333333')
 

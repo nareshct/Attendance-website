@@ -66,22 +66,22 @@ export function GlobalSearch() {
         onKeyDown={(e) => {
           if (e.key === 'Escape') setOpen(false)
         }}
-        className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-blue focus:border-brand-blue"
+        className="input input-sm"
       />
       {showDropdown && (
-        <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-80 overflow-y-auto">
+        <div className="absolute left-0 right-0 mt-1.5 bg-white border border-gray-200 rounded-xl shadow-md z-20 max-h-80 overflow-y-auto">
           {results.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-gray-400">No matches.</p>
+            <p className="px-3 py-2 text-sm text-text-secondary">No matches.</p>
           ) : (
             results.map((r) => (
               <button
                 key={`${r.type}-${r.id}`}
                 type="button"
                 onClick={() => goTo(r)}
-                className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-50 last:border-b-0"
+                className="block w-full text-left px-3 py-2 text-sm transition-colors duration-150 ease-out hover:bg-primary-tint border-b border-gray-50 last:border-b-0"
               >
                 <span className="font-medium text-navy">{r.label}</span>
-                <span className="text-gray-400 ml-2 text-xs">
+                <span className="text-text-secondary ml-2 text-xs">
                   {TYPE_LABELS[r.type]} · {r.sublabel}
                 </span>
               </button>

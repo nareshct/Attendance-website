@@ -10,15 +10,15 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 COMPANY_NAME = 'Apex Binary'
 
-NAVY = colors.HexColor('#1e3a5f')
-NAVY_DARK = colors.HexColor('#152b47')
+NAVY = colors.HexColor('#0f172a')
+NAVY_DARK = colors.HexColor('#0a0f1c')
 SKY = colors.HexColor('#3b82f6')
-GREEN = colors.HexColor('#16a34a')
-GOLD = colors.HexColor('#f59e0b')
-GREY = colors.HexColor('#6b7280')
+GREEN = colors.HexColor('#176b41')
+ACCENT = colors.HexColor('#4338ca')
+GREY = colors.HexColor('#64748b')
 LINE = colors.HexColor('#e2e8f0')
-CARD_BG = colors.HexColor('#eff6ff')
-STRIPE_BG = colors.HexColor('#f3f7fb')
+CARD_BG = colors.HexColor('#eef2ff')
+STRIPE_BG = colors.HexColor('#f1f5f9')
 BAR_BG = colors.HexColor('#e5e7eb')
 WHITE = colors.white
 
@@ -59,7 +59,7 @@ def _progress_bar(fraction):
 def _section_heading(text):
     style = ParagraphStyle('SectionHeading', fontName='Helvetica-Bold', fontSize=12, textColor=NAVY, spaceAfter=0)
     underline = Table([['']], colWidths=[16 * mm], rowHeights=[1.2 * mm])
-    underline.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), GOLD)]))
+    underline.setStyle(TableStyle([('BACKGROUND', (0, 0), (0, 0), ACCENT)]))
     heading_table = Table([[Paragraph(text, style)], [underline]], colWidths=[CONTENT_WIDTH])
     heading_table.setStyle(TableStyle([
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -77,7 +77,7 @@ def _draw_header_footer(canvas, doc):
     # Header band
     canvas.setFillColor(NAVY)
     canvas.rect(0, PAGE_HEIGHT - HEADER_HEIGHT, PAGE_WIDTH, HEADER_HEIGHT, stroke=0, fill=1)
-    canvas.setFillColor(GOLD)
+    canvas.setFillColor(ACCENT)
     canvas.rect(0, PAGE_HEIGHT - HEADER_HEIGHT - 1.5 * mm, PAGE_WIDTH, 1.5 * mm, stroke=0, fill=1)
 
     canvas.setFillColor(WHITE)
@@ -85,7 +85,7 @@ def _draw_header_footer(canvas, doc):
     canvas.drawString(MARGIN, PAGE_HEIGHT - HEADER_HEIGHT / 2 - 2 * mm, COMPANY_NAME)
 
     canvas.setFont('Helvetica', 8)
-    canvas.setFillColor(colors.HexColor('#c7d7ea'))
+    canvas.setFillColor(colors.HexColor('#c7d2fe'))
     canvas.drawString(MARGIN, PAGE_HEIGHT - HEADER_HEIGHT / 2 + 4 * mm, 'Coaching center for kids')
 
     canvas.setFont('Helvetica-Bold', 19)
@@ -163,7 +163,7 @@ def render_student_report_pdf(enrollment):
 
     count_style = ParagraphStyle('CountLabel', fontName='Helvetica', fontSize=10, textColor=GREY)
     elements.append(Paragraph(
-        f'Classes taken: <b><font color="#1e3a5f">{enrollment.classes_completed}</font></b> / {enrollment.classes_total}',
+        f'Classes taken: <b><font color="#0f172a">{enrollment.classes_completed}</font></b> / {enrollment.classes_total}',
         count_style,
     ))
     elements.append(Spacer(1, 3 * mm))
@@ -197,7 +197,7 @@ def render_student_report_pdf(enrollment):
         ('BACKGROUND', (0, 0), (-1, 0), NAVY),
         ('TEXTCOLOR', (0, 0), (-1, 0), WHITE),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('LINEBELOW', (0, 0), (-1, 0), 1.5, GOLD),
+        ('LINEBELOW', (0, 0), (-1, 0), 1.5, ACCENT),
         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
         ('FONTSIZE', (0, 0), (-1, -1), 9),
         ('ALIGN', (0, 0), (0, -1), 'CENTER'),

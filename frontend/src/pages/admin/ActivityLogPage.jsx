@@ -36,38 +36,38 @@ export default function ActivityLogPage() {
   return (
     <div>
       <h1 className="text-2xl font-semibold text-navy mb-2">Activity Log</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <p className="text-sm text-text-secondary mb-6">
         A trail of sensitive actions — payments, transfers, and deletions — showing who did what and when.
       </p>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">When</th>
-              <th className="px-4 py-3">Who</th>
-              <th className="px-4 py-3">Action</th>
-              <th className="px-4 py-3">Record</th>
-              <th className="px-4 py-3">Detail</th>
+              <th className="table-head-cell">When</th>
+              <th className="table-head-cell">Who</th>
+              <th className="table-head-cell">Action</th>
+              <th className="table-head-cell">Record</th>
+              <th className="table-head-cell">Detail</th>
             </tr>
           </thead>
           <tbody>
             {logs.map((log) => (
-              <tr key={log.id} className="border-t border-gray-100">
-                <td className="px-4 py-3 whitespace-nowrap">{formatDateTime(log.created_at)}</td>
-                <td className="px-4 py-3">{log.actor_name}</td>
-                <td className="px-4 py-3">{ACTION_LABELS[log.action] || log.action}</td>
-                <td className="px-4 py-3">{log.object_repr}</td>
-                <td className="px-4 py-3 text-gray-500">{log.detail || '—'}</td>
+              <tr key={log.id} className="table-row">
+                <td className="table-cell whitespace-nowrap">{formatDateTime(log.created_at)}</td>
+                <td className="table-cell">{log.actor_name}</td>
+                <td className="table-cell">{ACTION_LABELS[log.action] || log.action}</td>
+                <td className="table-cell">{log.object_repr}</td>
+                <td className="table-cell text-text-secondary">{log.detail || '—'}</td>
               </tr>
             ))}
             {!loading && logs.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">No activity recorded yet.</td></tr>
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">No activity recorded yet.</td></tr>
             )}
             {loading && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
             )}
           </tbody>
         </table>
@@ -75,10 +75,10 @@ export default function ActivityLogPage() {
 
       {!loading && logs.length > 0 && (
         <div className="flex items-center justify-between mt-3">
-          <p className="text-xs text-gray-400">Showing {logs.length} of {count}</p>
+          <p className="text-xs text-text-tertiary">Showing {logs.length} of {count}</p>
           <div className="flex gap-4">
             {page > 1 && (
-              <button onClick={loadLess} className="text-xs text-brand-blue hover:underline">
+              <button onClick={loadLess} className="text-xs font-medium text-primary hover:underline focus-ring">
                 Load less
               </button>
             )}
@@ -86,7 +86,7 @@ export default function ActivityLogPage() {
               <button
                 disabled={loadingMore}
                 onClick={loadMore}
-                className="text-xs text-brand-blue hover:underline disabled:opacity-60"
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
               >
                 {loadingMore ? 'Loading…' : 'Load more'}
               </button>

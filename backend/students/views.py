@@ -30,6 +30,18 @@ def _parent_link_payload(link):
     }
 
 
+class ParentPaymentPlanSerializer(PaymentPlanSerializer):
+    """Same fields as PaymentPlanSerializer minus refund_note — that's free text an
+    admin types when withdrawing a student (see EnrollmentsPage.jsx / BatchDetailPage.jsx
+    withdraw forms), meant for internal record-keeping, not for the public, unauthenticated
+    parent share link. Used only by ParentShareView below; the admin-facing
+    EnrollmentHistoryWithPaymentSerializer still uses the unrestricted PaymentPlanSerializer.
+    """
+
+    class Meta(PaymentPlanSerializer.Meta):
+        fields = [f for f in PaymentPlanSerializer.Meta.fields if f != 'refund_note']
+
+
 class EnrollmentHistorySerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)
     trainer_name = serializers.CharField(source='trainer.name', read_only=True)
@@ -217,12 +229,12 @@ class ParentShareView(APIView):
                 'class_days': e.class_days,
                 'recent_classes': [
                     {'date': a.date, 'topic_covered': a.topic_covered}
-                    for a in e.attendance_records.filter(status='present').order_by('-date')[:10]
+                    for a in e.attendance_records.filter(status='present').order_by('-date')
                 ],
             }
             plan = getattr(e, 'payment_plan', None)
             if plan is not None:
-                row['payment_plan'] = PaymentPlanSerializer(plan).data
+                row['payment_plan'] = ParentPaymentPlanSerializer(plan).data
             rows.append(row)
 
         return Response({

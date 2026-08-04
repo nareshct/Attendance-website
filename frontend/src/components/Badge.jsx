@@ -1,25 +1,36 @@
 const STYLES = {
-  active: 'bg-green-100 text-brand-green',
-  ongoing: 'bg-green-100 text-brand-green',
-  present: 'bg-green-100 text-brand-green',
-  paid: 'bg-green-100 text-brand-green',
-  received: 'bg-green-100 text-brand-green',
-  complete: 'bg-green-100 text-brand-green',
-  approved: 'bg-green-100 text-brand-green',
-  archived: 'bg-gray-100 text-gray-600',
-  completed: 'bg-blue-100 text-brand-blue',
-  closed: 'bg-blue-100 text-brand-blue',
-  absent: 'bg-red-100 text-red-700',
-  denied: 'bg-red-100 text-red-700',
-  overdue: 'bg-red-100 text-red-700',
-  withdrawn: 'bg-red-100 text-red-700',
-  cancelled: 'bg-red-100 text-red-700',
-  pending: 'bg-amber-100 text-brand-amber',
-  incomplete: 'bg-amber-100 text-brand-amber',
-  open: 'bg-amber-100 text-brand-amber',
+  active: 'bg-success-tint text-success border-success-tint-border',
+  ongoing: 'bg-success-tint text-success border-success-tint-border',
+  present: 'bg-success-tint text-success border-success-tint-border',
+  paid: 'bg-success-tint text-success border-success-tint-border',
+  received: 'bg-success-tint text-success border-success-tint-border',
+  complete: 'bg-success-tint text-success border-success-tint-border',
+  approved: 'bg-success-tint text-success border-success-tint-border',
+  completed: 'bg-info-tint text-info border-info-tint-border',
+  closed: 'bg-info-tint text-info border-info-tint-border',
+  absent: 'bg-error-tint text-error border-error-tint-border',
+  denied: 'bg-error-tint text-error border-error-tint-border',
+  overdue: 'bg-error-tint text-error border-error-tint-border',
+  withdrawn: 'bg-error-tint text-error border-error-tint-border',
+  cancelled: 'bg-error-tint text-error border-error-tint-border',
+  pending: 'bg-warning-tint text-warning border-warning-tint-border',
+  incomplete: 'bg-warning-tint text-warning border-warning-tint-border',
+  open: 'bg-warning-tint text-warning border-warning-tint-border',
 }
 
+// Statuses with no real "in-progress/health" meaning read better as a
+// plain neutral chip than with a colored status dot.
+const NEUTRAL = new Set(['archived'])
+
 export function Badge({ status }) {
-  const style = STYLES[status] || 'bg-gray-100 text-gray-600'
-  return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${style}`}>{status}</span>
+  const style = STYLES[status] || 'bg-gray-100 text-text-secondary border-gray-200'
+  const isNeutral = NEUTRAL.has(status) || !STYLES[status]
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${style}`}
+    >
+      {!isNeutral && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />}
+      {status}
+    </span>
+  )
 }

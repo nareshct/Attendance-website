@@ -61,12 +61,12 @@ export default function AdminDashboard() {
     <div>
       <h1 className="text-2xl font-semibold text-navy mb-6">Dashboard</h1>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <StatCard label="Active students" value={stats ? stats.activeStudents : '…'} accentClass="text-brand-blue" />
-        <StatCard label="Ongoing enrollments" value={stats ? stats.ongoingEnrollments : '…'} accentClass="text-brand-green" />
-        <StatCard label="Total pending" value={stats ? `₹${stats.totalPending}` : '…'} accentClass="text-brand-amber" />
+        <StatCard label="Active students" value={stats ? stats.activeStudents : '…'} accentClass="text-navy" />
+        <StatCard label="Ongoing enrollments" value={stats ? stats.ongoingEnrollments : '…'} accentClass="text-success" />
+        <StatCard label="Total pending" value={stats ? `₹${stats.totalPending}` : '…'} accentClass="text-warning" />
       </div>
 
       {alerts && (alerts.overdue_invoices.length > 0 || alerts.due_installments.length > 0) && (
@@ -75,7 +75,7 @@ export default function AdminDashboard() {
             <Card className="p-0">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
                 <h2 className="text-sm font-semibold text-navy">Overdue invoices</h2>
-                <span className="text-xs font-medium text-red-600 bg-red-50 rounded-full px-2 py-0.5">
+                <span className="text-xs font-medium text-error bg-error-tint rounded-full px-2 py-0.5">
                   {alerts.overdue_invoices.length}
                 </span>
               </div>
@@ -84,20 +84,20 @@ export default function AdminDashboard() {
                   <Link
                     key={a.id}
                     to={`/admin/clients/${a.client_id}`}
-                    className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-gray-100 first:border-t-0 hover:bg-gray-50 transition-colors"
+                    className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-gray-100 first:border-t-0 hover:bg-surface-sunken transition-colors duration-150 ease-out"
                   >
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-navy truncate">{a.client_name}</div>
-                      <div className="text-xs text-red-600">{a.days_overdue}d overdue · {formatDateRange(a.cycle_start, a.cycle_end)}</div>
+                      <div className="text-xs text-error">{a.days_overdue}d overdue · {formatDateRange(a.cycle_start, a.cycle_end)}</div>
                     </div>
-                    <div className="text-sm font-medium text-navy whitespace-nowrap">₹{a.amount}</div>
+                    <div className="text-sm font-medium text-navy whitespace-nowrap tabular-nums">₹{a.amount}</div>
                   </Link>
                 ))}
               </div>
               {alerts.overdue_invoices.length > ALERT_PREVIEW_COUNT && (
                 <button
                   onClick={() => setShowAllOverdue((v) => !v)}
-                  className="w-full text-center text-xs text-brand-blue hover:underline py-2 border-t border-gray-100"
+                  className="w-full text-center text-xs font-medium text-primary hover:underline py-2 border-t border-gray-100 transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
                 >
                   {showAllOverdue ? 'Show less' : `+ ${alerts.overdue_invoices.length - ALERT_PREVIEW_COUNT} more`}
                 </button>
@@ -109,7 +109,7 @@ export default function AdminDashboard() {
             <Card className="p-0">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
                 <h2 className="text-sm font-semibold text-navy">Installments due</h2>
-                <span className="text-xs font-medium text-brand-amber bg-amber-50 rounded-full px-2 py-0.5">
+                <span className="text-xs font-medium text-warning bg-warning-tint rounded-full px-2 py-0.5">
                   {alerts.due_installments.length}
                 </span>
               </div>
@@ -118,20 +118,20 @@ export default function AdminDashboard() {
                   <Link
                     key={a.id}
                     to={`/admin/students/${a.student_id}`}
-                    className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-gray-100 first:border-t-0 hover:bg-gray-50 transition-colors"
+                    className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-gray-100 first:border-t-0 hover:bg-surface-sunken transition-colors duration-150 ease-out"
                   >
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-navy truncate">{a.student_name}</div>
-                      <div className="text-xs text-brand-amber">Installment #{a.sequence} · {a.course_name}</div>
+                      <div className="text-xs text-warning">Installment #{a.sequence} · {a.course_name}</div>
                     </div>
-                    <div className="text-sm font-medium text-navy whitespace-nowrap">₹{a.amount}</div>
+                    <div className="text-sm font-medium text-navy whitespace-nowrap tabular-nums">₹{a.amount}</div>
                   </Link>
                 ))}
               </div>
               {alerts.due_installments.length > ALERT_PREVIEW_COUNT && (
                 <button
                   onClick={() => setShowAllDue((v) => !v)}
-                  className="w-full text-center text-xs text-brand-blue hover:underline py-2 border-t border-gray-100"
+                  className="w-full text-center text-xs font-medium text-primary hover:underline py-2 border-t border-gray-100 transition-colors duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
                 >
                   {showAllDue ? 'Show less' : `+ ${alerts.due_installments.length - ALERT_PREVIEW_COUNT} more`}
                 </button>
@@ -144,49 +144,49 @@ export default function AdminDashboard() {
       <h2 className="text-lg font-semibold text-navy mb-3">Revenue by cycle</h2>
       <Card className="p-0">
         <div className="overflow-auto max-h-[28rem]">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-left sticky top-0 z-10">
+          <table className="table">
+            <thead className="table-head-row sticky top-0 z-10">
               <tr>
-                <th className="px-4 py-3">Cycle</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Classes</th>
-                <th className="px-4 py-3 text-right">B2B revenue</th>
-                <th className="px-4 py-3 text-right">B2C revenue</th>
-                <th className="px-4 py-3 text-right">Total revenue</th>
-                <th className="px-4 py-3 text-right">Trainer pay</th>
-                <th className="px-4 py-3 text-right">Profit</th>
+                <th className="table-head-cell">Cycle</th>
+                <th className="table-head-cell">Status</th>
+                <th className="table-head-cell text-right">Classes</th>
+                <th className="table-head-cell text-right">B2B revenue</th>
+                <th className="table-head-cell text-right">B2C revenue</th>
+                <th className="table-head-cell text-right">Total revenue</th>
+                <th className="table-head-cell text-right">Trainer pay</th>
+                <th className="table-head-cell text-right">Profit</th>
               </tr>
             </thead>
             <tbody>
               {(cycleHistory || []).map((c) => (
-                <tr key={c.cycle_id} className="border-t border-gray-100 bg-white">
-                  <td className="px-4 py-3">{formatDate(c.cycle_start)} – {formatDate(c.cycle_end)}</td>
-                  <td className="px-4 py-3"><Badge status={c.status} /></td>
-                  <td className="px-4 py-3 text-right">{c.total_classes}</td>
-                  <td className="px-4 py-3 text-right">₹{c.b2b_revenue}</td>
-                  <td className="px-4 py-3 text-right">₹{c.b2c_revenue}</td>
-                  <td className="px-4 py-3 text-right font-medium">₹{c.total_revenue}</td>
-                  <td className="px-4 py-3 text-right text-gray-500">₹{c.total_trainer_cost}</td>
-                  <td className="px-4 py-3 text-right font-medium text-brand-green">₹{c.total_profit}</td>
+                <tr key={c.cycle_id} className="table-row bg-white">
+                  <td className="table-cell">{formatDate(c.cycle_start)} – {formatDate(c.cycle_end)}</td>
+                  <td className="table-cell"><Badge status={c.status} /></td>
+                  <td className="table-cell text-right tabular-nums">{c.total_classes}</td>
+                  <td className="table-cell text-right tabular-nums">₹{c.b2b_revenue}</td>
+                  <td className="table-cell text-right tabular-nums">₹{c.b2c_revenue}</td>
+                  <td className="table-cell text-right font-medium tabular-nums">₹{c.total_revenue}</td>
+                  <td className="table-cell text-right text-text-secondary tabular-nums">₹{c.total_trainer_cost}</td>
+                  <td className="table-cell text-right font-medium text-success tabular-nums">₹{c.total_profit}</td>
                 </tr>
               ))}
               {cycleHistory && cycleHistory.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400">No billing cycles yet.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-text-tertiary">No billing cycles yet.</td></tr>
               )}
               {!cycleHistory && (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={8} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
               )}
             </tbody>
             {cycleHistory && cycleHistory.length > 0 && (
               <tfoot className="sticky bottom-0 z-10">
-                <tr className="border-t border-gray-200 bg-gray-50">
-                  <td className="px-4 py-3 text-navy font-semibold" colSpan={2}>Total</td>
-                  <td className="px-4 py-3 text-right font-semibold">{historyTotals.total_classes}</td>
-                  <td className="px-4 py-3 text-right font-semibold">₹{historyTotals.b2b_revenue.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right font-semibold">₹{historyTotals.b2c_revenue.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right font-semibold">₹{historyTotals.total_revenue.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-500">₹{historyTotals.total_trainer_cost.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-brand-green">₹{historyTotals.total_profit.toFixed(2)}</td>
+                <tr className="border-t border-gray-200 bg-surface-sunken">
+                  <td className="px-4 py-3.5 text-navy font-semibold" colSpan={2}>Total</td>
+                  <td className="px-4 py-3.5 text-right font-semibold tabular-nums">{historyTotals.total_classes}</td>
+                  <td className="px-4 py-3.5 text-right font-semibold tabular-nums">₹{historyTotals.b2b_revenue.toFixed(2)}</td>
+                  <td className="px-4 py-3.5 text-right font-semibold tabular-nums">₹{historyTotals.b2c_revenue.toFixed(2)}</td>
+                  <td className="px-4 py-3.5 text-right font-semibold tabular-nums">₹{historyTotals.total_revenue.toFixed(2)}</td>
+                  <td className="px-4 py-3.5 text-right font-semibold text-text-secondary tabular-nums">₹{historyTotals.total_trainer_cost.toFixed(2)}</td>
+                  <td className="px-4 py-3.5 text-right font-semibold text-success tabular-nums">₹{historyTotals.total_profit.toFixed(2)}</td>
                 </tr>
               </tfoot>
             )}

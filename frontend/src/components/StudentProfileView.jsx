@@ -6,6 +6,7 @@ import { useApi } from '../hooks/useApi'
 import { formatDate } from '../utils/date'
 import { formatDays, formatTime } from '../utils/schedule'
 import { Badge } from './Badge'
+import { Button } from './Button'
 import { Card } from './Card'
 import { ConfirmDialog } from './ConfirmDialog'
 import { Modal } from './Modal'
@@ -296,89 +297,87 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
     })
   }
 
-  if (error) return <p className="text-red-600 text-sm">{error}</p>
-  if (!profile) return <p className="text-gray-400 text-sm">Loading…</p>
+  if (error) return <p className="text-error text-sm">{error}</p>
+  if (!profile) return <p className="text-text-tertiary text-sm">Loading…</p>
 
   return (
     <div>
-      <Link to={backTo} className="text-sm text-brand-blue hover:underline">&larr; {backLabel}</Link>
+      <Link to={backTo} className="text-sm font-medium text-primary hover:underline focus-ring">&larr; {backLabel}</Link>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mt-3 mb-6">
         <h1 className="text-2xl font-semibold text-navy">{profile.name}</h1>
         <div className="flex flex-wrap items-center gap-3">
           <Badge status={profile.status} />
           {allowEdit && (
-            <button onClick={toggleParentLink} className="text-sm rounded-lg border border-brand-blue text-brand-blue px-4 py-2 hover:bg-blue-50">
+            <Button variant="secondary" onClick={toggleParentLink}>
               {showParentLink ? 'Hide parent link' : 'Parent link'}
-            </button>
+            </Button>
           )}
           {allowEdit && !editingProfile && (
-            <button onClick={openEditProfile} className="text-sm rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800">
-              Edit details
-            </button>
+            <Button variant="success" onClick={openEditProfile}>Edit details</Button>
           )}
         </div>
       </div>
 
       {allowEdit && (
         <Modal open={showParentLink} onClose={toggleParentLink} title="Parent share link">
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-text-secondary mb-3">
             A private, read-only link — no login required. Anyone with it can see this student's schedule,
             progress, and payment plan. Regenerate if it's ever shared by mistake.
           </p>
           {parentLinkBusy && !parentLink ? (
-            <p className="text-sm text-gray-400">Loading…</p>
+            <p className="text-sm text-text-tertiary">Loading…</p>
           ) : parentLink ? (
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <code className="text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 break-all">
+                <code className="text-xs bg-surface-sunken border border-gray-200 rounded px-2 py-1 break-all">
                   {parentLink.url}
                 </code>
                 {parentLink.revoked && <Badge status="denied" />}
               </div>
               <div className="flex gap-3 mt-3 text-sm">
-                <button onClick={handleCopyParentLink} className="text-brand-blue hover:underline">
+                <button onClick={handleCopyParentLink} className="font-medium text-primary hover:underline focus-ring">
                   {copied ? 'Copied!' : 'Copy link'}
                 </button>
-                <button disabled={parentLinkBusy} onClick={handleRegenerateParentLink} className="text-brand-blue hover:underline disabled:opacity-60">
+                <button disabled={parentLinkBusy} onClick={handleRegenerateParentLink} className="font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
                   Regenerate
                 </button>
                 {!parentLink.revoked && (
-                  <button disabled={parentLinkBusy} onClick={handleRevokeParentLink} className="text-red-600 hover:underline disabled:opacity-60">
+                  <button disabled={parentLinkBusy} onClick={handleRevokeParentLink} className="font-medium text-error hover:underline disabled:opacity-60 focus-ring">
                     Revoke
                   </button>
                 )}
               </div>
             </div>
           ) : null}
-          {parentLinkError && <p className="text-red-600 text-xs mt-2">{parentLinkError}</p>}
+          {parentLinkError && <p className="text-error text-xs mt-2">{parentLinkError}</p>}
         </Modal>
       )}
 
       <Card className="mb-6">
         <dl className={`grid grid-cols-2 gap-4 text-sm mb-2 ${profile.source_type !== undefined ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}`}>
-          <div><dt className="text-gray-500">Student ID</dt><dd className="font-mono">{profile.student_id}</dd></div>
-          <div><dt className="text-gray-500">Grade</dt><dd>{profile.grade}</dd></div>
+          <div><dt className="text-text-secondary">Student ID</dt><dd className="font-mono">{profile.student_id}</dd></div>
+          <div><dt className="text-text-secondary">Grade</dt><dd>{profile.grade}</dd></div>
           {profile.source_type !== undefined && (
-            <div><dt className="text-gray-500">Source</dt><dd>{profile.source_type}</dd></div>
+            <div><dt className="text-text-secondary">Source</dt><dd>{profile.source_type}</dd></div>
           )}
           {profile.client_name !== undefined && (
             <div>
-              <dt className="text-gray-500">Client</dt>
+              <dt className="text-text-secondary">Client</dt>
               <dd>
                 {profile.client ? (
-                  <Link to={`/admin/clients/${profile.client}`} className="text-brand-blue hover:underline">{profile.client_name}</Link>
+                  <Link to={`/admin/clients/${profile.client}`} className="text-primary hover:underline focus-ring">{profile.client_name}</Link>
                 ) : (
                   profile.client_name || '—'
                 )}
               </dd>
             </div>
           )}
-          <div><dt className="text-gray-500">Parent name</dt><dd>{profile.parent_name}</dd></div>
+          <div><dt className="text-text-secondary">Parent name</dt><dd>{profile.parent_name}</dd></div>
           {profile.parent_phone_number !== undefined && (
-            <div><dt className="text-gray-500">Parent phone</dt><dd>{profile.parent_phone_number}</dd></div>
+            <div><dt className="text-text-secondary">Parent phone</dt><dd>{profile.parent_phone_number}</dd></div>
           )}
-          <div><dt className="text-gray-500">Place</dt><dd>{profile.place}</dd></div>
+          <div><dt className="text-text-secondary">Place</dt><dd>{profile.place}</dd></div>
         </dl>
       </Card>
 
@@ -387,17 +386,17 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
           <form onSubmit={handleSaveProfile} className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Name</label>
+                <label className="block text-xs text-text-secondary mb-1">Name</label>
                 <input required maxLength={255} value={profileForm?.name ?? ''} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} className="input" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Grade</label>
+                <label className="block text-xs text-text-secondary mb-1">Grade</label>
                 <select required value={profileForm?.grade ?? ''} onChange={(e) => setProfileForm({ ...profileForm, grade: e.target.value })} className="input">
                   {GRADES.map((g) => <option key={g} value={g}>Std {g}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Source</label>
+                <label className="block text-xs text-text-secondary mb-1">Source</label>
                 <select
                   value={profileForm?.source_type ?? 'B2C'}
                   onChange={(e) => setProfileForm({ ...profileForm, source_type: e.target.value, client: '' })}
@@ -409,7 +408,7 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
               </div>
               {profileForm?.source_type === 'B2B' && (
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Client</label>
+                  <label className="block text-xs text-text-secondary mb-1">Client</label>
                   <select required value={profileForm.client} onChange={(e) => setProfileForm({ ...profileForm, client: e.target.value })} className="input">
                     <option value="">Select client…</option>
                     {clients.map((c) => (
@@ -419,34 +418,34 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                 </div>
               )}
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Parent name</label>
+                <label className="block text-xs text-text-secondary mb-1">Parent name</label>
                 <input maxLength={255} value={profileForm?.parent_name ?? ''} onChange={(e) => setProfileForm({ ...profileForm, parent_name: e.target.value })} className="input" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Parent phone</label>
+                <label className="block text-xs text-text-secondary mb-1">Parent phone</label>
                 <input maxLength={20} value={profileForm?.parent_phone_number ?? ''} onChange={(e) => setProfileForm({ ...profileForm, parent_phone_number: e.target.value })} className="input" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Place</label>
+                <label className="block text-xs text-text-secondary mb-1">Place</label>
                 <input maxLength={255} value={profileForm?.place ?? ''} onChange={(e) => setProfileForm({ ...profileForm, place: e.target.value })} className="input" />
               </div>
             </div>
-            {profileError && <p className="text-red-600 text-xs">{profileError}</p>}
+            {profileError && <p className="text-error text-xs">{profileError}</p>}
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={closeEditProfile} className="text-sm text-gray-500 hover:underline">
+              <Button type="button" variant="ghost" onClick={closeEditProfile}>
                 Cancel
-              </button>
-              <button disabled={savingProfile} type="submit" className="text-sm text-brand-green hover:underline disabled:opacity-60">
+              </Button>
+              <Button type="submit" variant="success" disabled={savingProfile}>
                 {savingProfile ? 'Saving…' : 'Save'}
-              </button>
+              </Button>
             </div>
           </form>
         </Modal>
       )}
 
       <h2 className="text-lg font-semibold text-navy mb-3">Batch history</h2>
-      {downloadReportError && <p className="text-red-600 text-xs mb-3">{downloadReportError}</p>}
-      {downloadCertificateError && <p className="text-red-600 text-xs mb-3">{downloadCertificateError}</p>}
+      {downloadReportError && <p className="text-error text-xs mb-3">{downloadReportError}</p>}
+      {downloadCertificateError && <p className="text-error text-xs mb-3">{downloadCertificateError}</p>}
       <div className="space-y-3">
         {profile.enrollments.map((e) => (
           <Card key={e.id}>
@@ -457,7 +456,7 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                 <button
                   disabled={downloadingReportId === e.id}
                   onClick={() => handleDownloadReport(e.id)}
-                  className="text-xs text-brand-blue hover:underline disabled:opacity-60"
+                  className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
                 >
                   {downloadingReportId === e.id ? 'Downloading…' : 'Download PDF'}
                 </button>
@@ -465,20 +464,20 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                   <button
                     disabled={downloadingCertificateId === e.id}
                     onClick={() => handleDownloadCertificate(e.id)}
-                    className="text-xs text-brand-green hover:underline disabled:opacity-60"
+                    className="text-xs font-medium text-success hover:underline disabled:opacity-60 focus-ring"
                   >
                     {downloadingCertificateId === e.id ? 'Downloading…' : 'Download certificate'}
                   </button>
                 )}
               </div>
             </div>
-            <p className="text-sm text-gray-500 mb-2">
+            <p className="text-sm text-text-secondary mb-2">
               Trainer:{' '}
               {allowEdit ? (
                 <Link
                   to={`/admin/trainers/${e.trainer}`}
                   state={{ from: `/admin/students/${studentId}`, fromLabel: `Back to ${profile.name}` }}
-                  className="text-brand-blue hover:underline"
+                  className="text-primary hover:underline focus-ring"
                 >
                   {e.trainer_name}
                 </Link>
@@ -503,24 +502,24 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                   <button
                     disabled={!transferTrainer || transferring}
                     onClick={() => handleTransfer(e.id)}
-                    className="text-brand-green hover:underline disabled:opacity-60 text-xs"
+                    className="font-medium text-success hover:underline disabled:opacity-60 text-xs focus-ring"
                   >
                     {transferring ? 'Transferring…' : 'Confirm'}
                   </button>
-                  <button onClick={closeTransfer} className="text-gray-500 hover:underline text-xs">
+                  <button onClick={closeTransfer} className="font-medium text-text-secondary hover:underline text-xs focus-ring">
                     Cancel
                   </button>
                 </div>
-                {transferError && <p className="text-red-600 text-xs">{transferError}</p>}
+                {transferError && <p className="text-error text-xs">{transferError}</p>}
               </div>
             )}
 
             <div className="flex items-center gap-3">
-              <button onClick={() => toggleHistory(e.id)} className="text-xs text-brand-blue hover:underline">
+              <button onClick={() => toggleHistory(e.id)} className="text-xs font-medium text-primary hover:underline focus-ring">
                 {expanded === e.id ? 'Hide class history' : 'View class history'}
               </button>
               {allowTransfer && e.status === 'ongoing' && transferId !== e.id && (
-                <button onClick={() => openTransfer(e.id)} className="text-xs text-brand-blue hover:underline">
+                <button onClick={() => openTransfer(e.id)} className="text-xs font-medium text-primary hover:underline focus-ring">
                   Transfer
                 </button>
               )}
@@ -528,13 +527,13 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
 
             {expanded === e.id && (
               <div className="mt-3 border-t border-gray-100 pt-3">
-                {loadingSessions === e.id && <p className="text-xs text-gray-400">Loading…</p>}
+                {loadingSessions === e.id && <p className="text-xs text-text-tertiary">Loading…</p>}
                 {sessionsByEnrollment[e.id] && sessionsByEnrollment[e.id].length === 0 && (
-                  <p className="text-xs text-gray-400">No classes taken yet.</p>
+                  <p className="text-xs text-text-tertiary">No classes taken yet.</p>
                 )}
                 {sessionsByEnrollment[e.id] && sessionsByEnrollment[e.id].length > 0 && (
                   <table className="w-full text-xs">
-                    <thead className="text-gray-500 text-left">
+                    <thead className="text-text-secondary text-left">
                       <tr>
                         <th className="py-1 pr-4">Date</th>
                         <th className="py-1">Topic covered</th>
@@ -545,13 +544,13 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                       {sessionsByEnrollment[e.id].map((s) => (
                         <tr key={s.id} className="border-t border-gray-50">
                           <td className="py-1 pr-4">{formatDate(s.date)}</td>
-                          <td className="py-1 text-gray-500">{s.topic_covered || '—'}</td>
+                          <td className="py-1 text-text-secondary">{s.topic_covered || '—'}</td>
                           {allowEdit && (
                             <td className="py-1 pl-4 text-right whitespace-nowrap">
                               {s.in_closed_cycle ? (
-                                <span className="text-gray-400">Locked</span>
+                                <span className="text-text-tertiary">Locked</span>
                               ) : (
-                                <button onClick={() => openDeleteSession(e.id, s.id)} className="text-red-600 hover:underline">
+                                <button onClick={() => openDeleteSession(e.id, s.id)} className="font-medium text-error hover:underline focus-ring">
                                   Delete
                                 </button>
                               )}
@@ -571,13 +570,13 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                   Payment plan — {e.payment_plan.plan_type_display} · Total ₹{e.payment_plan.total_amount}
                 </p>
                 {Number(e.payment_plan.refunded_amount) > 0 && (
-                  <p className="text-xs text-red-600 mb-2">
+                  <p className="text-xs text-error mb-2">
                     Refunded ₹{e.payment_plan.refunded_amount}
                     {e.payment_plan.refund_note && ` — ${e.payment_plan.refund_note}`}
                   </p>
                 )}
                 <table className="w-full text-xs">
-                  <thead className="text-gray-500 text-left">
+                  <thead className="text-text-secondary text-left">
                     <tr>
                       <th className="py-1 pr-4">Due</th>
                       <th className="py-1 pr-4">Amount</th>
@@ -590,26 +589,26 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                         <td className="py-1 pr-4">
                           {inst.due_at_classes === null ? 'Before class 1' : `Before class ${inst.due_at_classes}`}
                         </td>
-                        <td className="py-1 pr-4">₹{inst.amount}</td>
+                        <td className="py-1 pr-4 tabular-nums">₹{inst.amount}</td>
                         <td className="py-1 text-right whitespace-nowrap">
                           {inst.paid_status === 'cancelled' ? (
-                            <span className="text-gray-400">Cancelled</span>
+                            <span className="text-text-tertiary">Cancelled</span>
                           ) : inst.paid_status === 'paid' ? (
                             markingPaidId === inst.id ? (
-                              <span className="text-gray-400">Undoing…</span>
+                              <span className="text-text-tertiary">Undoing…</span>
                             ) : (
-                              <span className="text-brand-green">
+                              <span className="text-success">
                                 Paid{inst.paid_date ? ` on ${formatDate(inst.paid_date)}` : ''}
                                 {' · '}
-                                <button onClick={() => handleRevokePaid(inst.id)} className="text-gray-400 hover:text-red-600 hover:underline">
+                                <button onClick={() => handleRevokePaid(inst.id)} className="text-text-tertiary hover:text-error hover:underline focus-ring">
                                   Undo
                                 </button>
                               </span>
                             )
                           ) : markingPaidId === inst.id ? (
-                            <span className="text-gray-400">Marking…</span>
+                            <span className="text-text-tertiary">Marking…</span>
                           ) : (
-                            <button onClick={() => handleMarkPaid(inst.id)} className="text-brand-blue hover:underline">
+                            <button onClick={() => handleMarkPaid(inst.id)} className="font-medium text-primary hover:underline focus-ring">
                               Mark as paid
                             </button>
                           )}
@@ -618,12 +617,12 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                     ))}
                   </tbody>
                 </table>
-                {markPaidError && <p className="text-red-600 text-xs mt-2">{markPaidError}</p>}
+                {markPaidError && <p className="text-error text-xs mt-2">{markPaidError}</p>}
               </div>
             )}
           </Card>
         ))}
-        {profile.enrollments.length === 0 && <p className="text-gray-400 text-sm">No enrollments yet.</p>}
+        {profile.enrollments.length === 0 && <p className="text-text-tertiary text-sm">No enrollments yet.</p>}
       </div>
 
       <ConfirmDialog

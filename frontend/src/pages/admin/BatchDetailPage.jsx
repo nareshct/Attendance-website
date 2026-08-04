@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiUpload, downloadFile } from '../../api/client'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Modal } from '../../components/Modal'
@@ -517,62 +518,56 @@ export default function BatchDetailPage() {
     }
   }
 
-  if (error && !batch) return <p className="text-red-600 text-sm">{error}</p>
-  if (!batch) return <p className="text-gray-400 text-sm">Loading…</p>
+  if (error && !batch) return <p className="text-error text-sm">{error}</p>
+  if (!batch) return <p className="text-text-tertiary text-sm">Loading…</p>
 
   return (
     <div>
-      <Link to="/admin/batches" className="text-sm text-brand-blue hover:underline">&larr; Back to batches</Link>
+      <Link to="/admin/batches" className="text-sm font-medium text-primary hover:underline focus-ring">&larr; Back to batches</Link>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mt-3 mb-6">
         <h1 className="text-2xl font-semibold text-navy">{batch.name}</h1>
         <div className="flex flex-wrap items-center gap-3">
           <Badge status={batch.status} />
           {!batch.accepting_enrollments && (
-            <span className="text-xs text-brand-amber bg-amber-50 rounded-full px-2.5 py-0.5">Enrollment closed</span>
+            <span className="text-xs text-warning bg-warning-tint rounded-full px-2.5 py-0.5">Enrollment closed</span>
           )}
-          <button onClick={openEditBatch} className="text-sm rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800">
-            Edit details
-          </button>
-          <button
-            disabled={deletingBatch}
-            onClick={() => setConfirmDeleteBatchOpen(true)}
-            className="text-sm rounded-lg border border-red-200 text-red-600 px-4 py-2 hover:bg-red-50 disabled:opacity-60"
-          >
+          <Button variant="success" onClick={openEditBatch}>Edit details</Button>
+          <Button variant="danger" disabled={deletingBatch} onClick={() => setConfirmDeleteBatchOpen(true)}>
             {deletingBatch ? 'Deleting…' : 'Delete batch'}
-          </button>
+          </Button>
         </div>
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <Card className="mb-6">
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-          <div><dt className="text-gray-500">Course</dt><dd>{batch.course_name}</dd></div>
-          <div><dt className="text-gray-500">Total classes</dt><dd>{batch.total_classes}</dd></div>
-          <div><dt className="text-gray-500">Fee per student</dt><dd>₹{batch.fee_per_student}</dd></div>
-          <div><dt className="text-gray-500">Payment plan</dt><dd>{batch.payment_type_display}</dd></div>
+          <div><dt className="text-text-secondary">Course</dt><dd>{batch.course_name}</dd></div>
+          <div><dt className="text-text-secondary">Total classes</dt><dd>{batch.total_classes}</dd></div>
+          <div><dt className="text-text-secondary">Fee per student</dt><dd>₹{batch.fee_per_student}</dd></div>
+          <div><dt className="text-text-secondary">Payment plan</dt><dd>{batch.payment_type_display}</dd></div>
           <div>
-            <dt className="text-gray-500">Schedule</dt>
+            <dt className="text-text-secondary">Schedule</dt>
             <dd>{formatDays(batch.class_days)}{batch.class_time && ` · ${formatTime(batch.class_time)}`}</dd>
           </div>
-          <div><dt className="text-gray-500">Started</dt><dd>{formatDate(batch.start_date)}</dd></div>
+          <div><dt className="text-text-secondary">Started</dt><dd>{formatDate(batch.start_date)}</dd></div>
           <div>
-            <dt className="text-gray-500">Meet link</dt>
+            <dt className="text-text-secondary">Meet link</dt>
             <dd>
               {batch.meet_link ? (
-                <a href={batch.meet_link} target="_blank" rel="noreferrer" className="text-brand-blue hover:underline">Open</a>
+                <a href={batch.meet_link} target="_blank" rel="noreferrer" className="text-primary hover:underline focus-ring">Open</a>
               ) : '—'}
             </dd>
           </div>
-          <div><dt className="text-gray-500">Sessions logged</dt><dd>{batch.session_count}</dd></div>
+          <div><dt className="text-text-secondary">Sessions logged</dt><dd>{batch.session_count}</dd></div>
           <div className="col-span-2">
-            <dt className="text-gray-500">Trainers</dt>
+            <dt className="text-text-secondary">Trainers</dt>
             <dd>{batch.trainer_names ? batch.trainer_names.split(',').filter(Boolean).join(', ') : '—'}</dd>
           </div>
         </dl>
         {batch.description && (
-          <p className="text-sm text-gray-500 mt-4 pt-4 border-t border-gray-100">{batch.description}</p>
+          <p className="text-sm text-text-secondary mt-4 pt-4 border-t border-gray-100">{batch.description}</p>
         )}
       </Card>
 
@@ -601,18 +596,18 @@ export default function BatchDetailPage() {
               value={batchForm.fee_per_student}
               onChange={(e) => setBatchForm({ ...batchForm, fee_per_student: e.target.value })}
               disabled={batch.enrolled_count > 0}
-              className="input disabled:bg-gray-50 disabled:text-gray-400"
+              className="input"
             />
             <select
               value={batchForm.payment_type}
               onChange={(e) => setBatchForm({ ...batchForm, payment_type: e.target.value })}
               disabled={batch.enrolled_count > 0}
-              className="input disabled:bg-gray-50 disabled:text-gray-400"
+              className="input"
             >
               {PAYMENT_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             {batch.enrolled_count > 0 && (
-              <p className="sm:col-span-2 text-xs text-gray-400 -mt-2">
+              <p className="sm:col-span-2 text-xs text-text-tertiary -mt-2">
                 Fee and payment plan are locked — {batch.enrolled_count} student(s) already enrolled, and their
                 existing installments won't be recalculated.
               </p>
@@ -628,26 +623,23 @@ export default function BatchDetailPage() {
               Accepting new enrollments (uncheck to close sign-ups without changing batch status)
             </label>
             <div className="sm:col-span-2">
-              <p className="text-sm text-gray-500 mb-1">Class days</p>
+              <p className="text-sm text-text-secondary mb-1">Class days</p>
               <div className="flex flex-wrap gap-2">
                 {DAY_OPTIONS.map((d) => (
-                  <button
+                  <Button
                     key={d.code}
                     type="button"
+                    size="sm"
+                    variant={batchForm.class_days.includes(d.code) ? 'primary' : 'secondary'}
                     onClick={() => toggleFormDay(d.code)}
-                    className={`px-3 py-1.5 rounded-lg text-sm border ${
-                      batchForm.class_days.includes(d.code)
-                        ? 'bg-brand-blue text-white border-brand-blue'
-                        : 'bg-white text-gray-600 border-gray-200 hover:border-brand-blue'
-                    }`}
                   >
                     {d.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
             <div className="sm:col-span-2">
-              <p className="text-sm text-gray-500 mb-1">
+              <p className="text-sm text-text-secondary mb-1">
                 Trainers (optional — any name, not just registered trainers; any number, for split schedules or co-teaching)
               </p>
               <div className="flex gap-2 mb-2">
@@ -662,16 +654,16 @@ export default function BatchDetailPage() {
                 <datalist id="batch-trainer-suggestions-detail">
                   {trainers.map((t) => <option key={t.id} value={t.name} />)}
                 </datalist>
-                <button type="button" onClick={addFormTrainerName} disabled={!trainerNameInput.trim()} className="text-sm text-brand-blue hover:underline disabled:opacity-60 shrink-0">
+                <button type="button" onClick={addFormTrainerName} disabled={!trainerNameInput.trim()} className="text-sm font-medium text-primary hover:underline disabled:opacity-60 shrink-0 focus-ring">
                   + Add
                 </button>
               </div>
               {batchForm.trainerNames.length > 0 && (
                 <ul className="space-y-1">
                   {batchForm.trainerNames.map((name) => (
-                    <li key={name} className="flex items-center justify-between text-sm bg-gray-50 rounded px-3 py-1.5">
+                    <li key={name} className="flex items-center justify-between text-sm bg-surface-sunken rounded px-3 py-1.5">
                       <span>{name}</span>
-                      <button type="button" onClick={() => removeFormTrainerName(name)} className="text-xs text-red-600 hover:underline">
+                      <button type="button" onClick={() => removeFormTrainerName(name)} className="text-xs font-medium text-error hover:underline focus-ring">
                         Remove
                       </button>
                     </li>
@@ -682,14 +674,14 @@ export default function BatchDetailPage() {
             <input placeholder="Google Meet link (optional)" value={batchForm.meet_link} onChange={(e) => setBatchForm({ ...batchForm, meet_link: e.target.value })} className="input sm:col-span-2" />
             <textarea placeholder="Description (optional)" value={batchForm.description} onChange={(e) => setBatchForm({ ...batchForm, description: e.target.value })} className="input sm:col-span-2" rows={2} />
 
-            {batchFormError && <p className="sm:col-span-2 text-red-600 text-xs">{batchFormError}</p>}
+            {batchFormError && <p className="sm:col-span-2 text-error text-xs">{batchFormError}</p>}
             <div className="sm:col-span-2 flex justify-end gap-3">
-              <button type="button" onClick={closeEditBatch} className="text-sm text-gray-500 hover:underline">
+              <Button type="button" variant="ghost" onClick={closeEditBatch}>
                 Cancel
-              </button>
-              <button disabled={savingBatch} type="submit" className="rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800 disabled:opacity-60">
+              </Button>
+              <Button type="submit" variant="success" disabled={savingBatch}>
                 {savingBatch ? 'Saving…' : 'Save changes'}
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -700,25 +692,25 @@ export default function BatchDetailPage() {
           <h2 className="text-sm font-semibold text-navy mb-3">Revenue — separate from billing cycles</h2>
           {revenue ? (
             <dl className="grid grid-cols-2 gap-3 text-sm">
-              <div><dt className="text-gray-500">Enrolled</dt><dd className="text-lg font-semibold text-navy">{revenue.enrolled_count}</dd></div>
-              <div><dt className="text-gray-500">Gross expected</dt><dd className="text-lg font-semibold text-navy">₹{revenue.gross_expected}</dd></div>
-              <div><dt className="text-gray-500">Collected</dt><dd className="text-lg font-semibold text-brand-green">₹{revenue.collected}</dd></div>
-              <div><dt className="text-gray-500">Pending</dt><dd className="text-lg font-semibold text-brand-amber">₹{revenue.pending}</dd></div>
+              <div><dt className="text-text-secondary">Enrolled</dt><dd className="text-lg font-semibold text-navy tabular-nums">{revenue.enrolled_count}</dd></div>
+              <div><dt className="text-text-secondary">Gross expected</dt><dd className="text-lg font-semibold text-navy tabular-nums">₹{revenue.gross_expected}</dd></div>
+              <div><dt className="text-text-secondary">Collected</dt><dd className="text-lg font-semibold text-success tabular-nums">₹{revenue.collected}</dd></div>
+              <div><dt className="text-text-secondary">Pending</dt><dd className="text-lg font-semibold text-warning tabular-nums">₹{revenue.pending}</dd></div>
               {Number(revenue.total_refunded) > 0 && (
-                <div><dt className="text-gray-500">Refunded</dt><dd className="text-lg font-semibold text-red-600">₹{revenue.total_refunded}</dd></div>
+                <div><dt className="text-text-secondary">Refunded</dt><dd className="text-lg font-semibold text-error tabular-nums">₹{revenue.total_refunded}</dd></div>
               )}
               <div className="col-span-2 pt-2 border-t border-gray-100">
-                <dt className="text-gray-500">Net after payouts</dt>
-                <dd className="text-lg font-semibold text-navy">₹{revenue.net_after_payout}</dd>
+                <dt className="text-text-secondary">Net after payouts</dt>
+                <dd className="text-lg font-semibold text-navy tabular-nums">₹{revenue.net_after_payout}</dd>
               </div>
             </dl>
-          ) : <p className="text-sm text-gray-400">Loading…</p>}
+          ) : <p className="text-sm text-text-tertiary">Loading…</p>}
         </Card>
 
         <Card>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-navy">Payouts for running this batch</h2>
-            <button onClick={() => setShowAddPayout(true)} className="text-xs text-brand-blue hover:underline">
+            <button onClick={() => setShowAddPayout(true)} className="text-xs font-medium text-primary hover:underline focus-ring">
               + Add payout
             </button>
           </div>
@@ -727,14 +719,14 @@ export default function BatchDetailPage() {
               {payouts.map((p) => (
                 <li key={p.id} className="flex items-center justify-between">
                   <span>
-                    {p.recipient_name} <span className="text-gray-500">· ₹{p.amount}</span>
+                    {p.recipient_name} <span className="text-text-secondary tabular-nums">· ₹{p.amount}</span>
                   </span>
                   <span className="flex items-center gap-2">
                     <Badge status={p.paid ? 'paid' : 'pending'} />
                     {p.paid ? (
-                      p.paid_date && <span className="text-xs text-gray-400">on {formatDate(p.paid_date)}</span>
+                      p.paid_date && <span className="text-xs text-text-tertiary">on {formatDate(p.paid_date)}</span>
                     ) : (
-                      <button disabled={busy} onClick={() => handleMarkPayoutPaid(p.id)} className="text-xs text-brand-blue hover:underline disabled:opacity-60">
+                      <button disabled={busy} onClick={() => handleMarkPayoutPaid(p.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
                         Mark paid
                       </button>
                     )}
@@ -743,7 +735,7 @@ export default function BatchDetailPage() {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-gray-400">No payouts added for this batch yet — one entry per person.</p>
+            <p className="text-sm text-text-tertiary">No payouts added for this batch yet — one entry per person.</p>
           )}
         </Card>
       </div>
@@ -770,14 +762,14 @@ export default function BatchDetailPage() {
             onChange={(e) => setPayoutForm({ ...payoutForm, amount: e.target.value })}
             className="input"
           />
-          {addPayoutError && <p className="text-red-600 text-xs">{addPayoutError}</p>}
+          {addPayoutError && <p className="text-error text-xs">{addPayoutError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={() => setShowAddPayout(false)} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={() => setShowAddPayout(false)}>
               Cancel
-            </button>
-            <button disabled={addingPayout} type="submit" className="text-sm text-brand-green hover:underline disabled:opacity-60">
+            </Button>
+            <Button type="submit" variant="success" disabled={addingPayout}>
               {addingPayout ? 'Adding…' : 'Add'}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
@@ -785,35 +777,30 @@ export default function BatchDetailPage() {
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-navy">Enrolled students</h2>
         <div className="flex gap-2">
-          <button
-            disabled={exporting || enrollmentCount === 0}
-            onClick={handleExportStudents}
-            className="text-sm rounded-lg border border-gray-200 text-gray-600 px-4 py-2 hover:bg-gray-50 disabled:opacity-60"
-          >
+          <Button variant="secondary" disabled={exporting || enrollmentCount === 0} onClick={handleExportStudents}>
             {exporting ? 'Exporting…' : 'Export to Excel'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             disabled={!batch.accepting_enrollments}
             onClick={() => setShowImport(true)}
             title={!batch.accepting_enrollments ? 'This batch is closed to new enrollments' : undefined}
-            className="text-sm rounded-lg border border-brand-blue text-brand-blue px-4 py-2 hover:bg-blue-50 disabled:opacity-60 disabled:border-gray-200 disabled:text-gray-400 disabled:hover:bg-transparent"
           >
             Import from Excel
-          </button>
-          <button
+          </Button>
+          <Button
             disabled={!batch.accepting_enrollments}
             onClick={() => setShowAddStudent(true)}
             title={!batch.accepting_enrollments ? 'This batch is closed to new enrollments' : undefined}
-            className="text-sm rounded-lg bg-brand-blue text-white px-4 py-2 hover:bg-blue-800 disabled:opacity-60"
           >
             + Add student
-          </button>
+          </Button>
         </div>
       </div>
 
       <Modal open={showImport} onClose={closeImport} title="Import students from Excel" maxWidthClass="max-w-lg">
         <div className="space-y-3">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-text-secondary">
             Download the response sheet from your Google Form, rename its columns to match the template below
             (extra columns like Timestamp are fine, they're ignored), then upload it here.
           </p>
@@ -821,16 +808,16 @@ export default function BatchDetailPage() {
             type="button"
             onClick={handleDownloadTemplate}
             disabled={downloadingTemplate}
-            className="text-sm text-brand-blue hover:underline disabled:opacity-60"
+            className="text-sm font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
           >
             {downloadingTemplate ? 'Downloading…' : 'Download template (.xlsx)'}
           </button>
-          <ul className="text-xs text-gray-400 list-disc pl-4">
-            <li><span className="font-medium text-gray-500">Name</span> — required</li>
-            <li><span className="font-medium text-gray-500">Phone Number</span>, <span className="font-medium text-gray-500">Occupation</span>, <span className="font-medium text-gray-500">Email</span>, <span className="font-medium text-gray-500">How did you know about us?</span> — optional</li>
-            <li><span className="font-medium text-gray-500">Payment Status</span> — "Paid" marks the upfront installment paid; leave blank otherwise</li>
+          <ul className="text-xs text-text-tertiary list-disc pl-4">
+            <li><span className="font-medium text-text-secondary">Name</span> — required</li>
+            <li><span className="font-medium text-text-secondary">Phone Number</span>, <span className="font-medium text-text-secondary">Occupation</span>, <span className="font-medium text-text-secondary">Email</span>, <span className="font-medium text-text-secondary">How did you know about us?</span> — optional</li>
+            <li><span className="font-medium text-text-secondary">Payment Status</span> — "Paid" marks the upfront installment paid; leave blank otherwise</li>
           </ul>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-text-tertiary">
             Every row is added as someone not yet registered in the system — same as adding a guest by hand. This
             never creates or links a registered Student record.
           </p>
@@ -842,17 +829,17 @@ export default function BatchDetailPage() {
               onChange={(e) => setImportFile(e.target.files[0] || null)}
               className="input"
             />
-            {importError && <p className="text-red-600 text-xs">{importError}</p>}
+            {importError && <p className="text-error text-xs">{importError}</p>}
             {importResult && (
-              <div className="text-xs bg-gray-50 rounded-lg p-3 space-y-1">
-                <p className="text-brand-green font-medium">
+              <div className="text-xs bg-surface-sunken rounded-lg p-3 space-y-1">
+                <p className="text-success font-medium">
                   Enrolled {importResult.enrolled}
                   {importResult.marked_paid > 0 && `, ${importResult.marked_paid} marked paid`}.
                 </p>
                 {importResult.skipped.length > 0 && (
                   <div>
-                    <p className="text-brand-amber font-medium">{importResult.skipped.length} row(s) skipped:</p>
-                    <ul className="list-disc pl-4 text-gray-500">
+                    <p className="text-warning font-medium">{importResult.skipped.length} row(s) skipped:</p>
+                    <ul className="list-disc pl-4 text-text-secondary">
                       {importResult.skipped.map((s, i) => <li key={i}>Row {s.row}: {s.reason}</li>)}
                     </ul>
                   </div>
@@ -860,12 +847,12 @@ export default function BatchDetailPage() {
               </div>
             )}
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={closeImport} className="text-sm text-gray-500 hover:underline">
+              <Button type="button" variant="ghost" onClick={closeImport}>
                 Close
-              </button>
-              <button disabled={!importFile || importing} type="submit" className="text-sm text-brand-green hover:underline disabled:opacity-60">
+              </Button>
+              <Button type="submit" variant="success" disabled={!importFile || importing}>
                 {importing ? 'Importing…' : 'Import'}
-              </button>
+              </Button>
             </div>
           </form>
         </div>
@@ -873,20 +860,12 @@ export default function BatchDetailPage() {
 
       <Modal open={showAddStudent} onClose={closeAddStudent} title="Add student to batch">
         <div className="flex gap-2 mb-3">
-          <button
-            type="button"
-            onClick={() => setAddMode('existing')}
-            className={`text-sm rounded-lg px-3 py-1.5 ${addMode === 'existing' ? 'bg-brand-blue text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-          >
+          <Button type="button" size="sm" variant={addMode === 'existing' ? 'primary' : 'secondary'} onClick={() => setAddMode('existing')}>
             Registered student
-          </button>
-          <button
-            type="button"
-            onClick={() => setAddMode('guest')}
-            className={`text-sm rounded-lg px-3 py-1.5 ${addMode === 'guest' ? 'bg-brand-blue text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-          >
+          </Button>
+          <Button type="button" size="sm" variant={addMode === 'guest' ? 'primary' : 'secondary'} onClick={() => setAddMode('guest')}>
             Not registered yet
-          </button>
+          </Button>
         </div>
         <form onSubmit={handleAddStudent} className="space-y-3">
           {addMode === 'existing' ? (
@@ -930,24 +909,24 @@ export default function BatchDetailPage() {
                 onChange={(e) => setGuestForm({ ...guestForm, guest_source: e.target.value })}
                 className="input"
               />
-              <p className="text-xs text-gray-400">Not registered as a student — this just records their details for this batch.</p>
+              <p className="text-xs text-text-tertiary">Not registered as a student — this just records their details for this batch.</p>
             </>
           )}
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-text-tertiary">
             Fee: ₹{batch.fee_per_student} · {batch.payment_type_display}
           </p>
-          {addStudentError && <p className="text-red-600 text-xs">{addStudentError}</p>}
+          {addStudentError && <p className="text-error text-xs">{addStudentError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeAddStudent} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={closeAddStudent}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               disabled={(addMode === 'existing' ? !addStudentId : !guestForm.guest_name.trim()) || addingStudent}
               type="submit"
-              className="text-sm text-brand-green hover:underline disabled:opacity-60"
+              variant="success"
             >
               {addingStudent ? 'Adding…' : 'Add'}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
@@ -975,7 +954,7 @@ export default function BatchDetailPage() {
             <option value="registered">Registered only</option>
             <option value="guest">Not registered only</option>
           </select>
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-text-tertiary">
             {filteredEnrollments.length} shown · {enrollments.length} of {enrollmentCount} loaded
           </span>
         </div>
@@ -989,21 +968,21 @@ export default function BatchDetailPage() {
                 {e.is_guest ? (
                   <span className="font-medium">{e.student_name}</span>
                 ) : (
-                  <Link to={`/admin/students/${e.student}`} className="text-brand-blue hover:underline font-medium">{e.student_name}</Link>
+                  <Link to={`/admin/students/${e.student}`} className="text-primary hover:underline font-medium focus-ring">{e.student_name}</Link>
                 )}
                 {e.is_guest ? (
-                  <span className="text-xs text-amber-600 bg-amber-50 rounded px-1.5 py-0.5 ml-2">Not registered</span>
+                  <span className="text-xs text-warning bg-warning-tint rounded px-1.5 py-0.5 ml-2">Not registered</span>
                 ) : (
-                  <span className="text-xs text-gray-400 ml-2">{e.student_id_code}</span>
+                  <span className="text-xs text-text-tertiary ml-2">{e.student_id_code}</span>
                 )}
-                <span className="text-xs text-gray-400 ml-2">joined {formatDate(e.joined_date)}</span>
+                <span className="text-xs text-text-tertiary ml-2">joined {formatDate(e.joined_date)}</span>
                 {e.is_guest && (e.guest_phone_number || e.guest_email || e.guest_occupation || e.guest_source) && (
-                  <div className="text-xs text-gray-400 mt-0.5">
+                  <div className="text-xs text-text-tertiary mt-0.5">
                     {[e.guest_phone_number, e.guest_email, e.guest_occupation, e.guest_source].filter(Boolean).join(' · ')}
                   </div>
                 )}
                 {e.status === 'withdrawn' && Number(e.refunded_amount) > 0 && (
-                  <div className="text-xs text-red-500 mt-0.5">
+                  <div className="text-xs text-error mt-0.5">
                     Refunded ₹{e.refunded_amount}{e.refund_note && ` — ${e.refund_note}`}
                   </div>
                 )}
@@ -1011,32 +990,32 @@ export default function BatchDetailPage() {
               <div className="flex items-center gap-3">
                 <Badge status={e.status} />
                 {e.is_guest && (
-                  <button disabled={busy} onClick={() => openEditGuest(e)} className="text-xs text-brand-blue hover:underline disabled:opacity-60">
+                  <button disabled={busy} onClick={() => openEditGuest(e)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
                     Edit
                   </button>
                 )}
                 {e.is_guest && (
-                  <button disabled={busy} onClick={() => setConvertTarget(e)} className="text-xs text-brand-blue hover:underline disabled:opacity-60">
+                  <button disabled={busy} onClick={() => setConvertTarget(e)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
                     Register
                   </button>
                 )}
                 {e.status === 'active' && (
-                  <button disabled={busy} onClick={() => openWithdraw(e)} className="text-xs text-red-600 hover:underline disabled:opacity-60">
+                  <button disabled={busy} onClick={() => openWithdraw(e)} className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring">
                     Withdraw
                   </button>
                 )}
                 {e.status === 'withdrawn' && (
-                  <button disabled={busy} onClick={() => handleReactivate(e.id)} className="text-xs text-brand-blue hover:underline disabled:opacity-60">
+                  <button disabled={busy} onClick={() => handleReactivate(e.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
                     Reactivate
                   </button>
                 )}
-                <button disabled={busy} onClick={() => setRemoveTarget(e)} className="text-xs text-gray-400 hover:text-red-600 hover:underline disabled:opacity-60">
+                <button disabled={busy} onClick={() => setRemoveTarget(e)} className="text-xs text-text-tertiary hover:text-error hover:underline disabled:opacity-60 focus-ring">
                   Remove
                 </button>
               </div>
             </div>
             <table className="w-full text-xs">
-              <thead className="text-gray-500 text-left">
+              <thead className="text-text-secondary text-left">
                 <tr>
                   <th className="py-1 pr-4">Due</th>
                   <th className="py-1 pr-4">Amount</th>
@@ -1049,7 +1028,7 @@ export default function BatchDetailPage() {
                     <td className="py-1 pr-4">
                       {inst.due_at_sessions === null ? 'At signup' : `By session ${inst.due_at_sessions}`}
                     </td>
-                    <td className="py-1 pr-4">
+                    <td className="py-1 pr-4 tabular-nums">
                       {editingInstallmentId === inst.id ? (
                         <input
                           type="number"
@@ -1066,31 +1045,31 @@ export default function BatchDetailPage() {
                     <td className="py-1 text-right whitespace-nowrap">
                       {editingInstallmentId === inst.id ? (
                         <span>
-                          <button disabled={busy} onClick={() => handleSaveInstallmentAmount(inst.id)} className="text-brand-green hover:underline">
+                          <button disabled={busy} onClick={() => handleSaveInstallmentAmount(inst.id)} className="font-medium text-success hover:underline focus-ring">
                             Save
                           </button>
                           {' · '}
-                          <button onClick={() => setEditingInstallmentId(null)} className="text-gray-400 hover:underline">
+                          <button onClick={() => setEditingInstallmentId(null)} className="text-text-tertiary hover:underline focus-ring">
                             Cancel
                           </button>
                         </span>
                       ) : inst.paid_status === 'cancelled' ? (
-                        <span className="text-gray-400">Cancelled</span>
+                        <span className="text-text-tertiary">Cancelled</span>
                       ) : inst.paid_status === 'paid' ? (
-                        <span className="text-brand-green">
+                        <span className="text-success">
                           Paid{inst.paid_date ? ` on ${formatDate(inst.paid_date)}` : ''}
                           {' · '}
-                          <button disabled={busy} onClick={() => handleRevokeInstallment(inst.id)} className="text-gray-400 hover:text-red-600 hover:underline">
+                          <button disabled={busy} onClick={() => handleRevokeInstallment(inst.id)} className="text-text-tertiary hover:text-error hover:underline focus-ring">
                             Undo
                           </button>
                         </span>
                       ) : (
                         <span>
-                          <button disabled={busy} onClick={() => handleMarkInstallmentPaid(inst.id)} className="text-brand-blue hover:underline">
+                          <button disabled={busy} onClick={() => handleMarkInstallmentPaid(inst.id)} className="font-medium text-primary hover:underline focus-ring">
                             Mark as paid
                           </button>
                           {' · '}
-                          <button disabled={busy} onClick={() => openEditInstallment(inst)} className="text-gray-400 hover:underline">
+                          <button disabled={busy} onClick={() => openEditInstallment(inst)} className="text-text-tertiary hover:underline focus-ring">
                             Edit amount
                           </button>
                         </span>
@@ -1100,20 +1079,20 @@ export default function BatchDetailPage() {
                 ))}
               </tbody>
             </table>
-            {installmentEditError && editingInstallmentId && <p className="text-red-600 text-xs mt-1">{installmentEditError}</p>}
+            {installmentEditError && editingInstallmentId && <p className="text-error text-xs mt-1">{installmentEditError}</p>}
           </Card>
         ))}
-        {enrollmentsLoading && <p className="text-gray-400 text-sm">Loading…</p>}
-        {!enrollmentsLoading && enrollments.length === 0 && <p className="text-gray-400 text-sm">No students enrolled yet.</p>}
+        {enrollmentsLoading && <p className="text-text-tertiary text-sm">Loading…</p>}
+        {!enrollmentsLoading && enrollments.length === 0 && <p className="text-text-tertiary text-sm">No students enrolled yet.</p>}
         {!enrollmentsLoading && enrollments.length > 0 && filteredEnrollments.length === 0 && (
-          <p className="text-gray-400 text-sm">No students match these filters.</p>
+          <p className="text-text-tertiary text-sm">No students match these filters.</p>
         )}
       </div>
 
       {!enrollmentsLoading && enrollments.length > 0 && (
         <div className="flex items-center justify-end gap-4 mb-6">
           {enrollmentsPage > 1 && (
-            <button onClick={loadLessEnrollments} className="text-xs text-brand-blue hover:underline">
+            <button onClick={loadLessEnrollments} className="text-xs font-medium text-primary hover:underline focus-ring">
               Load less
             </button>
           )}
@@ -1121,7 +1100,7 @@ export default function BatchDetailPage() {
             <button
               disabled={enrollmentsLoadingMore}
               onClick={loadMoreEnrollments}
-              className="text-xs text-brand-blue hover:underline disabled:opacity-60"
+              className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
             >
               {enrollmentsLoadingMore ? 'Loading…' : 'Load more'}
             </button>
@@ -1150,15 +1129,15 @@ export default function BatchDetailPage() {
               onChange={(e) => setRefundForm({ ...refundForm, refund_note: e.target.value })}
               className="input"
             />
-            <p className="text-xs text-gray-400">Leave the refund amount blank if nothing needs to be paid back.</p>
-            {withdrawError && <p className="text-red-600 text-xs">{withdrawError}</p>}
+            <p className="text-xs text-text-tertiary">Leave the refund amount blank if nothing needs to be paid back.</p>
+            {withdrawError && <p className="text-error text-xs">{withdrawError}</p>}
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => setWithdrawTarget(null)} className="text-sm text-gray-500 hover:underline">
+              <Button type="button" variant="ghost" onClick={() => setWithdrawTarget(null)}>
                 Cancel
-              </button>
-              <button disabled={busy} type="submit" className="text-sm text-red-600 hover:underline disabled:opacity-60">
+              </Button>
+              <Button disabled={busy} type="submit" variant="danger">
                 {busy ? 'Withdrawing…' : 'Withdraw'}
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -1199,14 +1178,14 @@ export default function BatchDetailPage() {
               onChange={(e) => setEditGuestForm({ ...editGuestForm, guest_source: e.target.value })}
               className="input"
             />
-            {editGuestError && <p className="text-red-600 text-xs">{editGuestError}</p>}
+            {editGuestError && <p className="text-error text-xs">{editGuestError}</p>}
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => setEditGuestTarget(null)} className="text-sm text-gray-500 hover:underline">
+              <Button type="button" variant="ghost" onClick={() => setEditGuestTarget(null)}>
                 Cancel
-              </button>
-              <button disabled={savingGuestEdit} type="submit" className="text-sm text-brand-green hover:underline disabled:opacity-60">
+              </Button>
+              <Button disabled={savingGuestEdit} type="submit" variant="success">
                 {savingGuestEdit ? 'Saving…' : 'Save'}
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -1214,9 +1193,7 @@ export default function BatchDetailPage() {
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-navy">Sessions</h2>
-        <button onClick={() => setShowAddSession(true)} className="text-sm rounded-lg bg-brand-blue text-white px-4 py-2 hover:bg-blue-800">
-          + Log session
-        </button>
+        <Button onClick={() => setShowAddSession(true)}>+ Log session</Button>
       </div>
 
       <Modal open={showAddSession} onClose={() => setShowAddSession(false)} title="Log a session">
@@ -1225,43 +1202,43 @@ export default function BatchDetailPage() {
           <input required placeholder="Conducted by (name)" value={sessionForm.conducted_by_name} onChange={(e) => setSessionForm({ ...sessionForm, conducted_by_name: e.target.value })} className="input" />
           <input placeholder="Topic covered (optional)" value={sessionForm.topic_covered} onChange={(e) => setSessionForm({ ...sessionForm, topic_covered: e.target.value })} className="input" />
           <input placeholder="Recording link (Google Drive, optional)" value={sessionForm.recording_link} onChange={(e) => setSessionForm({ ...sessionForm, recording_link: e.target.value })} className="input" />
-          {addSessionError && <p className="text-red-600 text-xs">{addSessionError}</p>}
+          {addSessionError && <p className="text-error text-xs">{addSessionError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={() => setShowAddSession(false)} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={() => setShowAddSession(false)}>
               Cancel
-            </button>
-            <button disabled={addingSession} type="submit" className="text-sm text-brand-green hover:underline disabled:opacity-60">
+            </Button>
+            <Button disabled={addingSession} type="submit" variant="success">
               {addingSession ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Conducted by</th>
-              <th className="px-4 py-3">Topic</th>
-              <th className="px-4 py-3">Recording</th>
+              <th className="table-head-cell">Date</th>
+              <th className="table-head-cell">Conducted by</th>
+              <th className="table-head-cell">Topic</th>
+              <th className="table-head-cell">Recording</th>
             </tr>
           </thead>
           <tbody>
             {sessions.map((s) => (
-              <tr key={s.id} className="border-t border-gray-100">
-                <td className="px-4 py-3">{formatDate(s.date)}</td>
-                <td className="px-4 py-3">{s.conducted_by_name}</td>
-                <td className="px-4 py-3 text-gray-500">{s.topic_covered || '—'}</td>
-                <td className="px-4 py-3">
+              <tr key={s.id} className="table-row">
+                <td className="table-cell">{formatDate(s.date)}</td>
+                <td className="table-cell">{s.conducted_by_name}</td>
+                <td className="table-cell text-text-secondary">{s.topic_covered || '—'}</td>
+                <td className="table-cell">
                   {s.recording_link ? (
-                    <a href={s.recording_link} target="_blank" rel="noreferrer" className="text-brand-blue hover:underline">Open</a>
+                    <a href={s.recording_link} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline focus-ring">Open</a>
                   ) : '—'}
                 </td>
               </tr>
             ))}
             {sessions.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400">No sessions logged yet.</td></tr>
+              <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">No sessions logged yet.</td></tr>
             )}
           </tbody>
         </table>

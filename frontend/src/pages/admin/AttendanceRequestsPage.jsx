@@ -61,7 +61,7 @@ export default function AttendanceRequestsPage() {
     <div>
       <h1 className="text-2xl font-semibold text-navy mb-6">Attendance Requests</h1>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <h2 className="text-lg font-semibold text-navy mb-3">Pending</h2>
       <input
@@ -71,39 +71,39 @@ export default function AttendanceRequestsPage() {
         className="input mb-4 max-w-sm"
       />
       <Card className="p-0 overflow-x-auto mb-8">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Trainer</th>
-              <th className="px-4 py-3">Student</th>
-              <th className="px-4 py-3">Course</th>
-              <th className="px-4 py-3">Topic</th>
-              <th className="px-4 py-3">Requested</th>
-              <th className="px-4 py-3"></th>
+              <th className="table-head-cell">Date</th>
+              <th className="table-head-cell">Trainer</th>
+              <th className="table-head-cell">Student</th>
+              <th className="table-head-cell">Course</th>
+              <th className="table-head-cell">Topic</th>
+              <th className="table-head-cell">Requested</th>
+              <th className="table-head-cell"></th>
             </tr>
           </thead>
           <tbody>
             {filteredPending.map((r) => (
-              <tr key={r.id} className="border-t border-gray-100">
-                <td className="px-4 py-3">{formatDate(r.date)}</td>
-                <td className="px-4 py-3">{r.trainer_name}</td>
-                <td className="px-4 py-3">{r.student_name}</td>
-                <td className="px-4 py-3">{r.course_name}</td>
-                <td className="px-4 py-3 text-gray-500">{r.topic_covered || '—'}</td>
-                <td className="px-4 py-3 text-gray-500">{formatDateTime(r.created_at)}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-right space-x-3">
+              <tr key={r.id} className="table-row">
+                <td className="table-cell">{formatDate(r.date)}</td>
+                <td className="table-cell">{r.trainer_name}</td>
+                <td className="table-cell">{r.student_name}</td>
+                <td className="table-cell">{r.course_name}</td>
+                <td className="table-cell text-text-secondary">{r.topic_covered || '—'}</td>
+                <td className="table-cell text-text-secondary">{formatDateTime(r.created_at)}</td>
+                <td className="table-cell whitespace-nowrap text-right space-x-3">
                   <button
                     disabled={busyId === r.id}
                     onClick={() => handleApprove(r.id)}
-                    className="text-xs text-brand-green hover:underline disabled:opacity-60"
+                    className="text-xs font-medium text-success hover:underline disabled:opacity-60 focus-ring"
                   >
                     Approve
                   </button>
                   <button
                     disabled={busyId === r.id}
                     onClick={() => handleDeny(r.id)}
-                    className="text-xs text-red-600 hover:underline disabled:opacity-60"
+                    className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring"
                   >
                     Deny
                   </button>
@@ -111,7 +111,7 @@ export default function AttendanceRequestsPage() {
               </tr>
             ))}
             {filteredPending.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-gray-400">
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">
                 {pending.length === 0 ? 'No pending requests.' : 'No pending requests match your search.'}
               </td></tr>
             )}
@@ -121,30 +121,30 @@ export default function AttendanceRequestsPage() {
 
       <h2 className="text-lg font-semibold text-navy mb-3">Reviewed</h2>
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">Date</th>
-              <th className="px-4 py-3">Trainer</th>
-              <th className="px-4 py-3">Student</th>
-              <th className="px-4 py-3">Course</th>
-              <th className="px-4 py-3">Topic</th>
-              <th className="px-4 py-3">Status</th>
+              <th className="table-head-cell">Date</th>
+              <th className="table-head-cell">Trainer</th>
+              <th className="table-head-cell">Student</th>
+              <th className="table-head-cell">Course</th>
+              <th className="table-head-cell">Topic</th>
+              <th className="table-head-cell">Status</th>
             </tr>
           </thead>
           <tbody>
             {reviewed.map((r) => (
-              <tr key={r.id} className="border-t border-gray-100">
-                <td className="px-4 py-3">{formatDate(r.date)}</td>
-                <td className="px-4 py-3">{r.trainer_name}</td>
-                <td className="px-4 py-3">{r.student_name}</td>
-                <td className="px-4 py-3">{r.course_name}</td>
-                <td className="px-4 py-3 text-gray-500">{r.topic_covered || '—'}</td>
-                <td className="px-4 py-3"><Badge status={r.status} /></td>
+              <tr key={r.id} className="table-row">
+                <td className="table-cell">{formatDate(r.date)}</td>
+                <td className="table-cell">{r.trainer_name}</td>
+                <td className="table-cell">{r.student_name}</td>
+                <td className="table-cell">{r.course_name}</td>
+                <td className="table-cell text-text-secondary">{r.topic_covered || '—'}</td>
+                <td className="table-cell"><Badge status={r.status} /></td>
               </tr>
             ))}
             {reviewed.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">No reviewed requests yet.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">No reviewed requests yet.</td></tr>
             )}
           </tbody>
         </table>

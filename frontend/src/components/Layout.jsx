@@ -21,10 +21,10 @@ export default function Layout({ title, navItems, accentClass }) {
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="p-4 text-lg font-semibold border-b border-white/10">
+        <div className="p-5 text-base font-semibold border-b border-white/10 truncate">
           {auth.role === 'trainer' ? `Hello, ${auth.name || auth.username}` : title}
         </div>
-        <nav className="flex-1 p-2 space-y-1">
+        <nav className="flex-1 p-3 space-y-0.5">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -32,8 +32,10 @@ export default function Layout({ title, navItems, accentClass }) {
               end={item.end}
               onClick={() => setMobileOpen(false)}
               className={({ isActive }) =>
-                `block rounded-md px-3 py-2 text-sm transition-colors ${
-                  isActive ? 'bg-white/20 font-medium' : 'hover:bg-white/10'
+                `block rounded-lg border-l-2 px-3.5 py-2.5 text-sm transition-colors duration-150 ease-out ${
+                  isActive
+                    ? 'border-white bg-white/15 font-medium text-white'
+                    : 'border-transparent text-white/80 hover:bg-white/10 hover:text-white'
                 }`
               }
             >
@@ -42,17 +44,17 @@ export default function Layout({ title, navItems, accentClass }) {
           ))}
         </nav>
         <div className="p-4 border-t border-white/10 text-sm space-y-2">
-          <div className="truncate">{auth.username}</div>
+          <div className="truncate text-white/80">{auth.username}</div>
           <NavLink
             to={`/${auth.role === 'admin' ? 'admin' : 'trainer'}/change-password`}
             onClick={() => setMobileOpen(false)}
-            className="block w-full rounded-md bg-white/10 px-3 py-1.5 hover:bg-white/20 transition-colors text-center"
+            className="block w-full rounded-lg bg-white/10 px-3 py-2 hover:bg-white/20 transition-colors duration-150 ease-out text-center"
           >
             Account settings
           </NavLink>
           <button
             onClick={logout}
-            className="w-full rounded-md bg-white/10 px-3 py-1.5 hover:bg-white/20 transition-colors"
+            className="w-full rounded-lg bg-white/10 px-3 py-2 hover:bg-white/20 transition-colors duration-150 ease-out"
           >
             Log out
           </button>
@@ -62,7 +64,7 @@ export default function Layout({ title, navItems, accentClass }) {
         <div className="lg:hidden flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white shrink-0">
           <button
             onClick={() => setMobileOpen(true)}
-            className="p-2 -ml-2 rounded-md hover:bg-gray-100"
+            className="p-2 -ml-2 rounded-lg transition-colors duration-150 ease-out hover:bg-surface-sunken"
             aria-label="Open menu"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6 text-navy">

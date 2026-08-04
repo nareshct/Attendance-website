@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Modal } from '../../components/Modal'
@@ -419,12 +420,10 @@ export default function EnrollmentsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-navy">Enrollments</h1>
-        <button onClick={() => setShowForm(true)} className="text-sm rounded-lg bg-brand-blue text-white px-4 py-2 hover:bg-blue-800">
-          + New enrollment
-        </button>
+        <Button onClick={() => setShowForm(true)}>+ New enrollment</Button>
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="New enrollment" maxWidthClass="max-w-2xl">
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -457,7 +456,7 @@ export default function EnrollmentsPage() {
               className="input"
             />
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Batch count (total classes)</label>
+              <label className="block text-xs text-text-secondary mb-1">Batch count (total classes)</label>
               <input
                 required
                 type="number"
@@ -469,27 +468,24 @@ export default function EnrollmentsPage() {
               />
             </div>
             <div className="sm:col-span-2">
-              <p className="text-sm text-gray-500 mb-1">Class days</p>
+              <p className="text-sm text-text-secondary mb-1">Class days</p>
               <div className="flex flex-wrap gap-2">
                 {DAY_OPTIONS.map((d) => (
-                  <button
+                  <Button
                     key={d.code}
                     type="button"
+                    size="sm"
+                    variant={form.class_days.includes(d.code) ? 'primary' : 'secondary'}
                     onClick={() => toggleDay(d.code)}
-                    className={`px-3 py-1.5 rounded-lg text-sm border ${
-                      form.class_days.includes(d.code)
-                        ? 'bg-brand-blue text-white border-brand-blue'
-                        : 'bg-white text-gray-600 border-gray-200 hover:border-brand-blue'
-                    }`}
                   >
                     {d.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
             {selectedStudent?.source_type === 'B2C' && (
               <>
-                <p className="sm:col-span-2 text-xs text-gray-400 -mb-1">Payment plan</p>
+                <p className="sm:col-span-2 text-xs text-text-tertiary -mb-1">Payment plan</p>
                 <select
                   required
                   value={form.payment_type}
@@ -501,7 +497,7 @@ export default function EnrollmentsPage() {
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
-                <div className="input bg-gray-50 text-gray-600 flex items-center justify-between">
+                <div className="input bg-surface-sunken text-text-secondary flex items-center justify-between">
                   <span>Course rate</span>
                   <span className="font-medium text-navy">
                     {selectedCourse?.rate_per_class ? `₹${selectedCourse.rate_per_class}/class` : '— select a course first'}
@@ -520,19 +516,19 @@ export default function EnrollmentsPage() {
                     className="input"
                   />
                   {standardTotal != null && (
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="text-xs text-text-tertiary mt-1">
                       Standard total ₹{standardTotal} → after {discountPercent || 0}% off: ₹{discountedTotal} (max 15% discount)
                     </p>
                   )}
                 </div>
-                <div className="input bg-gray-50 text-gray-600 flex items-center justify-between">
+                <div className="input bg-surface-sunken text-text-secondary flex items-center justify-between">
                   <span>Due before class 1</span>
                   <span className="font-medium text-navy">
                     {upfrontPreview != null ? `₹${upfrontPreview}` : '—'}
                   </span>
                 </div>
                 {form.payment_type && (
-                  <p className="sm:col-span-2 text-xs text-gray-400 -mt-2">
+                  <p className="sm:col-span-2 text-xs text-text-tertiary -mt-2">
                     Upfront amount = {upfrontMilestone} classes × this plan's effective rate (discounted total ÷ total
                     classes), rounded to the nearest rupee.
                   </p>
@@ -540,25 +536,25 @@ export default function EnrollmentsPage() {
               </>
             )}
             {nextBatchNumber && (
-              <p className="sm:col-span-2 text-sm text-gray-500">
+              <p className="sm:col-span-2 text-sm text-text-secondary">
                 This will be created as <strong>Batch {nextBatchNumber}</strong> for this student + course.
               </p>
             )}
             {duplicateOngoingEnrollment && (
-              <p className="sm:col-span-2 text-sm text-brand-amber">
+              <p className="sm:col-span-2 text-sm text-warning">
                 Heads up — {duplicateOngoingEnrollment.student_name} already has an ongoing enrollment in this course
                 (Batch {duplicateOngoingEnrollment.batch_number}, with {duplicateOngoingEnrollment.trainer_name}). If
                 this is a mistake (e.g. a double submit), cancel and check the Enrollments list first.
               </p>
             )}
-            {error && <p className="sm:col-span-2 text-red-600 text-xs">{error}</p>}
+            {error && <p className="sm:col-span-2 text-error text-xs">{error}</p>}
             <div className="sm:col-span-2 flex justify-end gap-3">
-              <button type="button" onClick={() => setShowForm(false)} className="text-sm text-gray-500 hover:underline">
+              <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>
                 Cancel
-              </button>
-              <button disabled={submitting} type="submit" className="rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800 disabled:opacity-60">
+              </Button>
+              <Button type="submit" variant="success" disabled={submitting}>
                 {submitting ? 'Saving…' : 'Create enrollment'}
-              </button>
+              </Button>
             </div>
         </form>
       </Modal>
@@ -566,7 +562,7 @@ export default function EnrollmentsPage() {
       <Modal open={editId != null} onClose={closeEditSchedule} title="Edit schedule">
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Course</label>
+            <label className="block text-xs text-text-secondary mb-1">Course</label>
             {editingEnrollment?.classes_completed === 0 ? (
               <SearchableSelect
                 placeholder="Search course…"
@@ -575,17 +571,17 @@ export default function EnrollmentsPage() {
                 options={courses.map((c) => ({ value: c.id, label: c.name }))}
               />
             ) : (
-              <p className="text-sm text-gray-500">
-                {editingEnrollment?.course_name} <span className="text-xs text-gray-400">— can't be changed once classes have started.</span>
+              <p className="text-sm text-text-secondary">
+                {editingEnrollment?.course_name} <span className="text-xs text-text-tertiary">— can't be changed once classes have started.</span>
               </p>
             )}
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Class time</label>
+            <label className="block text-xs text-text-secondary mb-1">Class time</label>
             <input type="time" value={editClassTime} onChange={(ev) => setEditClassTime(ev.target.value)} className="input" />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Batch count (total classes)</label>
+            <label className="block text-xs text-text-secondary mb-1">Batch count (total classes)</label>
             <input
               type="number"
               min={editingEnrollment?.classes_completed || 1}
@@ -594,49 +590,42 @@ export default function EnrollmentsPage() {
               className="input"
             />
             {editingEnrollment?.classes_completed > 0 && (
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-text-tertiary mt-1">
                 Can't be less than the {editingEnrollment.classes_completed} classes already completed.
               </p>
             )}
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Class days</label>
+            <label className="block text-xs text-text-secondary mb-1">Class days</label>
             <div className="flex flex-wrap gap-2">
               {DAY_OPTIONS.map((d) => (
-                <button
+                <Button
                   key={d.code}
                   type="button"
+                  size="sm"
+                  variant={editClassDays.includes(d.code) ? 'primary' : 'secondary'}
                   onClick={() => toggleEditDay(d.code)}
-                  className={`px-3 py-1.5 rounded-lg text-sm border ${
-                    editClassDays.includes(d.code)
-                      ? 'bg-brand-blue text-white border-brand-blue'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-brand-blue'
-                  }`}
                 >
                   {d.label}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
-          {editError && <p className="text-red-600 text-xs">{editError}</p>}
+          {editError && <p className="text-error text-xs">{editError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeEditSchedule} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={closeEditSchedule}>
               Cancel
-            </button>
-            <button
-              disabled={editSaving}
-              onClick={() => handleEditSchedule(editId)}
-              className="text-sm text-brand-green hover:underline disabled:opacity-60"
-            >
+            </Button>
+            <Button variant="success" disabled={editSaving} onClick={() => handleEditSchedule(editId)}>
               {editSaving ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           </div>
         </div>
       </Modal>
 
       <Modal open={transferId != null} onClose={closeTransfer} title="Transfer enrollment">
         <div className="space-y-3">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-text-secondary">
             Move <strong>{transferEnrollment?.student_name}</strong>'s {transferEnrollment?.course_name} enrollment to a different trainer.
           </p>
           <SearchableSelect
@@ -645,25 +634,21 @@ export default function EnrollmentsPage() {
             onChange={setTransferTrainer}
             options={trainers.filter((t) => t.id !== transferEnrollment?.trainer).map((t) => ({ value: t.id, label: t.name }))}
           />
-          {transferError && <p className="text-red-600 text-xs">{transferError}</p>}
+          {transferError && <p className="text-error text-xs">{transferError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeTransfer} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={closeTransfer}>
               Cancel
-            </button>
-            <button
-              disabled={!transferTrainer || transferring}
-              onClick={() => handleTransfer(transferId)}
-              className="text-sm text-brand-green hover:underline disabled:opacity-60"
-            >
+            </Button>
+            <Button variant="success" disabled={!transferTrainer || transferring} onClick={() => handleTransfer(transferId)}>
               {transferring ? 'Transferring…' : 'Confirm'}
-            </button>
+            </Button>
           </div>
         </div>
       </Modal>
 
       <Modal open={substituteId != null} onClose={closeSubstitute} title="Assign substitute">
         <div className="space-y-3">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-text-secondary">
             Temporary coverage for <strong>{substituteEnrollment?.student_name}</strong>'s {substituteEnrollment?.course_name} classes.
           </p>
           <SearchableSelect
@@ -674,33 +659,33 @@ export default function EnrollmentsPage() {
           />
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Start date</label>
+              <label className="block text-xs text-text-secondary mb-1">Start date</label>
               <input type="date" value={substituteStart} onChange={(ev) => setSubstituteStart(ev.target.value)} className="input" />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">End date</label>
+              <label className="block text-xs text-text-secondary mb-1">End date</label>
               <input type="date" value={substituteEnd} onChange={(ev) => setSubstituteEnd(ev.target.value)} className="input" />
             </div>
           </div>
-          {substituteError && <p className="text-red-600 text-xs">{substituteError}</p>}
+          {substituteError && <p className="text-error text-xs">{substituteError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeSubstitute} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={closeSubstitute}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="success"
               disabled={!substituteTrainer || !substituteStart || !substituteEnd || assigningSubstitute}
               onClick={() => handleAssignSubstitute(substituteId)}
-              className="text-sm text-brand-green hover:underline disabled:opacity-60"
             >
               {assigningSubstitute ? 'Assigning…' : 'Confirm'}
-            </button>
+            </Button>
           </div>
         </div>
       </Modal>
 
       <Modal open={withdrawId != null} onClose={closeWithdraw} title="Withdraw enrollment">
         <div className="space-y-3">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-text-secondary">
             Withdraw <strong>{withdrawEnrollment?.student_name}</strong> from {withdrawEnrollment?.course_name}.
           </p>
           {students.find((s) => s.id === withdrawEnrollment?.student)?.source_type === 'B2C' && (
@@ -722,21 +707,17 @@ export default function EnrollmentsPage() {
               />
             </>
           )}
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-text-tertiary">
             Any pending installments will be cancelled. Classes already taught stay on record.
           </p>
-          {withdrawError && <p className="text-red-600 text-xs">{withdrawError}</p>}
+          {withdrawError && <p className="text-error text-xs">{withdrawError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={closeWithdraw} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={closeWithdraw}>
               Cancel
-            </button>
-            <button
-              disabled={withdrawing}
-              onClick={() => handleWithdraw(withdrawId)}
-              className="text-sm text-red-600 hover:underline disabled:opacity-60"
-            >
+            </Button>
+            <Button variant="danger" disabled={withdrawing} onClick={() => handleWithdraw(withdrawId)}>
               {withdrawing ? 'Withdrawing…' : 'Confirm withdrawal'}
-            </button>
+            </Button>
           </div>
         </div>
       </Modal>
@@ -750,78 +731,72 @@ export default function EnrollmentsPage() {
         />
         <div className="flex gap-2 shrink-0">
           {['ongoing', 'completed', 'withdrawn'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`text-sm rounded-lg px-4 py-2 capitalize ${
-                tab === t ? 'bg-brand-blue text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
-            >
+            <Button key={t} variant={tab === t ? 'primary' : 'secondary'} className="capitalize" onClick={() => setTab(t)}>
               {t}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">#</th>
-              <th className="px-4 py-3">Student</th>
-              <th className="px-4 py-3">Course</th>
-              <th className="px-4 py-3">Trainer</th>
-              <th className="px-4 py-3">Schedule</th>
-              <th className="px-4 py-3">Batch</th>
-              <th className="px-4 py-3">Progress</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Enrolled</th>
-              <th className="px-4 py-3"></th>
+              <th className="table-head-cell">#</th>
+              <th className="table-head-cell">Student</th>
+              <th className="table-head-cell">Course</th>
+              <th className="table-head-cell">Trainer</th>
+              <th className="table-head-cell">Schedule</th>
+              <th className="table-head-cell">Batch</th>
+              <th className="table-head-cell">Progress</th>
+              <th className="table-head-cell">Status</th>
+              <th className="table-head-cell">Enrolled</th>
+              <th className="table-head-cell"></th>
             </tr>
           </thead>
           <tbody>
             {filteredEnrollments.map((e, i) => (
-              <tr key={e.id} className="border-t border-gray-100">
-                <td className="px-4 py-3 text-gray-400">{i + 1}</td>
-                <td className="px-4 py-3">{e.student_name}</td>
-                <td className="px-4 py-3">{e.course_name}</td>
-                <td className="px-4 py-3">{e.trainer_name}</td>
-                <td className="px-4 py-3 text-gray-500">
+              <tr key={e.id} className="table-row">
+                <td className="table-cell text-text-tertiary">{i + 1}</td>
+                <td className="table-cell">{e.student_name}</td>
+                <td className="table-cell">{e.course_name}</td>
+                <td className="table-cell">{e.trainer_name}</td>
+                <td className="table-cell text-text-secondary">
                   {formatDays(e.class_days)}{e.class_time && ` · ${formatTime(e.class_time)}`}
                 </td>
-                <td className="px-4 py-3">{e.batch_number}</td>
-                <td className="px-4 py-3">{e.classes_completed}/{e.classes_total}</td>
-                <td className="px-4 py-3"><Badge status={e.status} /></td>
-                <td className="px-4 py-3">{formatDate(e.start_date)}</td>
-                <td className="px-4 py-3 text-right">
+                <td className="table-cell">{e.batch_number}</td>
+                <td className="table-cell tabular-nums">{e.classes_completed}/{e.classes_total}</td>
+                <td className="table-cell"><Badge status={e.status} /></td>
+                <td className="table-cell">{formatDate(e.start_date)}</td>
+                <td className="table-cell text-right">
                   {(e.status === 'ongoing' || e.status === 'completed') && (
                     <div className="space-y-1">
                       <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
-                        <button onClick={() => openEditSchedule(e)} className="text-brand-blue hover:underline whitespace-nowrap">
+                        <button onClick={() => openEditSchedule(e)} className="font-medium text-primary hover:underline whitespace-nowrap focus-ring">
                           Edit
                         </button>
                         {e.status === 'ongoing' && (
                           <>
-                            <button onClick={() => openTransfer(e.id)} className="text-brand-blue hover:underline whitespace-nowrap">
+                            <button onClick={() => openTransfer(e.id)} className="font-medium text-primary hover:underline whitespace-nowrap focus-ring">
                               Transfer
                             </button>
-                            <button onClick={() => openSubstitute(e.id)} className="text-brand-blue hover:underline whitespace-nowrap">
+                            <button onClick={() => openSubstitute(e.id)} className="font-medium text-primary hover:underline whitespace-nowrap focus-ring">
                               Substitute
                             </button>
-                            <button onClick={() => openWithdraw(e.id)} className="text-red-600 hover:underline whitespace-nowrap">
+                            <button onClick={() => openWithdraw(e.id)} className="font-medium text-error hover:underline whitespace-nowrap focus-ring">
                               Withdraw
                             </button>
                           </>
                         )}
                       </div>
                       {e.status === 'ongoing' && substituteAssignments.filter((sa) => sa.enrollment === e.id).map((sa) => (
-                        <div key={sa.id} className="text-xs text-gray-400">
+                        <div key={sa.id} className="text-xs text-text-tertiary">
                           {sa.substitute_trainer_name} covering {formatDateRange(sa.start_date, sa.end_date)}
                           {' · '}
                           <button
                             disabled={cancellingSubstituteId === sa.id}
                             onClick={() => setCancelSubstituteTarget(sa.id)}
-                            className="text-red-600 hover:underline disabled:opacity-60"
+                            className="font-medium text-error hover:underline disabled:opacity-60 focus-ring"
                           >
                             {cancellingSubstituteId === sa.id ? 'Cancelling…' : 'Cancel'}
                           </button>
@@ -833,12 +808,12 @@ export default function EnrollmentsPage() {
               </tr>
             ))}
             {!loading && filteredEnrollments.length === 0 && (
-              <tr><td colSpan={10} className="px-4 py-6 text-center text-gray-400">
+              <tr><td colSpan={10} className="px-4 py-6 text-center text-text-tertiary">
                 {search ? 'No enrollments match your search.' : `No ${tab} enrollments.`}
               </td></tr>
             )}
             {loading && (
-              <tr><td colSpan={10} className="px-4 py-6 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={10} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
             )}
           </tbody>
         </table>
@@ -846,13 +821,13 @@ export default function EnrollmentsPage() {
 
       {!loading && enrollments.length > 0 && (
         <div className="flex items-center justify-between mt-3">
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-text-tertiary">
             Showing {filteredEnrollments.length} {tab} enrollment{filteredEnrollments.length === 1 ? '' : 's'}
             {hasMore && ` (${enrollments.length} of ${enrollmentCount} loaded overall — search covers everything, but the status tab only applies to what's loaded)`}
           </p>
           <div className="flex gap-4">
             {page > 1 && (
-              <button onClick={loadLess} className="text-xs text-brand-blue hover:underline">
+              <button onClick={loadLess} className="text-xs font-medium text-primary hover:underline focus-ring">
                 Load less
               </button>
             )}
@@ -860,7 +835,7 @@ export default function EnrollmentsPage() {
               <button
                 disabled={loadingMore}
                 onClick={loadMore}
-                className="text-xs text-brand-blue hover:underline disabled:opacity-60"
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
               >
                 {loadingMore ? 'Loading…' : 'Load more'}
               </button>

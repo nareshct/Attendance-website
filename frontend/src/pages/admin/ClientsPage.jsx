@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
 import { Card, StatCard } from '../../components/Card'
 import { Modal } from '../../components/Modal'
 import { useApi } from '../../hooks/useApi'
@@ -70,17 +71,15 @@ export default function ClientsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-navy">Clients (B2B)</h1>
-        <button onClick={() => setShowForm(true)} className="text-sm rounded-lg bg-brand-blue text-white px-4 py-2 hover:bg-blue-800">
-          + Add client
-        </button>
+        <Button onClick={() => setShowForm(true)}>+ Add client</Button>
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <StatCard label="Total pending" value={summary ? `₹${summary.total_pending_amount}` : '…'} accentClass="text-brand-amber" />
-        <StatCard label="Total earning" value={summary ? `₹${summary.total_earning}` : '…'} accentClass="text-brand-green" />
-        <StatCard label="Total classes taken" value={summary ? summary.total_classes : '…'} accentClass="text-brand-blue" />
+        <StatCard label="Total pending" value={summary ? `₹${summary.total_pending_amount}` : '…'} accentClass="text-warning" />
+        <StatCard label="Total earning" value={summary ? `₹${summary.total_earning}` : '…'} accentClass="text-success" />
+        <StatCard label="Total classes taken" value={summary ? summary.total_classes : '…'} accentClass="text-navy" />
       </div>
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add client" maxWidthClass="max-w-2xl">
@@ -89,14 +88,14 @@ export default function ClientsPage() {
           <input required placeholder="Contact phone" value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} className="input" />
           <input placeholder="Contact email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} className="input" />
           <input required type="number" step="0.01" placeholder="Rate per class (₹)" value={form.rate_per_class} onChange={(e) => setForm({ ...form, rate_per_class: e.target.value })} className="input" />
-          {error && <p className="sm:col-span-3 text-red-600 text-xs">{error}</p>}
+          {error && <p className="sm:col-span-3 text-error text-xs">{error}</p>}
           <div className="sm:col-span-3 flex justify-end gap-3">
-            <button type="button" onClick={() => setShowForm(false)} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>
               Cancel
-            </button>
-            <button disabled={submitting} type="submit" className="rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800 disabled:opacity-60">
+            </Button>
+            <Button type="submit" variant="success" disabled={submitting}>
               {submitting ? 'Saving…' : 'Save client'}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
@@ -110,49 +109,43 @@ export default function ClientsPage() {
         />
         <div className="flex gap-2 shrink-0">
           {['active', 'archived'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setStatusTab(t)}
-              className={`text-sm rounded-lg px-4 py-2 capitalize ${
-                statusTab === t ? 'bg-brand-blue text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
-            >
+            <Button key={t} variant={statusTab === t ? 'primary' : 'secondary'} className="capitalize" onClick={() => setStatusTab(t)}>
               {t}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">Company</th>
-              <th className="px-4 py-3">Phone</th>
-              <th className="px-4 py-3">Pending amount</th>
-              <th className="px-4 py-3"></th>
+              <th className="table-head-cell">Company</th>
+              <th className="table-head-cell">Phone</th>
+              <th className="table-head-cell">Pending amount</th>
+              <th className="table-head-cell"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((c) => (
-              <tr key={c.id} className="border-t border-gray-100">
-                <td className="px-4 py-3">
-                  <Link to={`/admin/clients/${c.id}`} className="text-brand-blue hover:underline">{c.company_name}</Link>
+              <tr key={c.id} className="table-row">
+                <td className="table-cell">
+                  <Link to={`/admin/clients/${c.id}`} className="font-medium text-primary hover:underline focus-ring">{c.company_name}</Link>
                 </td>
-                <td className="px-4 py-3">{c.contact_phone}</td>
-                <td className="px-4 py-3">
+                <td className="table-cell">{c.contact_phone}</td>
+                <td className="table-cell">
                   <div className="flex items-center gap-2">
-                    <span>₹{c.pending_amount}</span>
+                    <span className="tabular-nums">₹{c.pending_amount}</span>
                     {c.has_overdue_invoice && <Badge status="overdue" />}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="table-cell text-right">
                   {c.status === 'active' ? (
-                    <button onClick={() => handleArchive(c.id)} className="text-xs text-gray-500 hover:text-red-600">
+                    <button onClick={() => handleArchive(c.id)} className="text-xs text-text-secondary hover:text-error focus-ring">
                       Archive
                     </button>
                   ) : (
-                    <button onClick={() => handleUnarchive(c.id)} className="text-xs text-gray-500 hover:text-brand-green">
+                    <button onClick={() => handleUnarchive(c.id)} className="text-xs text-text-secondary hover:text-success focus-ring">
                       Unarchive
                     </button>
                   )}
@@ -160,7 +153,7 @@ export default function ClientsPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400">No clients found.</td></tr>
+              <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">No clients found.</td></tr>
             )}
           </tbody>
         </table>

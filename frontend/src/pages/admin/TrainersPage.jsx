@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
 import { useApi } from '../../hooks/useApi'
@@ -87,12 +88,10 @@ export default function TrainersPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-navy">Trainers</h1>
-        <button onClick={() => setShowForm(true)} className="text-sm rounded-lg bg-brand-blue text-white px-4 py-2 hover:bg-blue-800">
-          + Onboard trainer
-        </button>
+        <Button onClick={() => setShowForm(true)}>+ Onboard trainer</Button>
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-4">{error}</p>}
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Onboard trainer" maxWidthClass="max-w-2xl">
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -107,7 +106,7 @@ export default function TrainersPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Default rate per class (₹)</label>
-            <p className="text-xs text-gray-500 mb-2">Applies to every course this trainer teaches, unless overridden below.</p>
+            <p className="text-xs text-text-secondary mb-2">Applies to every course this trainer teaches, unless overridden below.</p>
             <input
               required
               placeholder="e.g. 100"
@@ -121,7 +120,7 @@ export default function TrainersPage() {
 
           <div>
             <p className="text-sm font-medium text-gray-700 mb-1">Course-specific overrides (optional)</p>
-            <p className="text-xs text-gray-500 mb-2">Only add a line here if a course should pay a different rate than the default.</p>
+            <p className="text-xs text-text-secondary mb-2">Only add a line here if a course should pay a different rate than the default.</p>
             <div className="space-y-2">
               {rates.map((r, i) => (
                 <div key={i} className="flex gap-2">
@@ -139,7 +138,7 @@ export default function TrainersPage() {
                     onChange={(e) => updateRate(i, 'rate_per_class', e.target.value)}
                     className="input"
                   />
-                  <button type="button" onClick={() => removeRate(i)} className="text-xs text-red-600 hover:underline shrink-0">
+                  <button type="button" onClick={() => removeRate(i)} className="text-xs font-medium text-error hover:underline shrink-0 focus-ring">
                     Remove
                   </button>
                 </div>
@@ -148,20 +147,20 @@ export default function TrainersPage() {
             <button
               type="button"
               onClick={() => setRates((rs) => [...rs, { course: '', rate_per_class: '' }])}
-              className="text-xs text-brand-blue hover:underline mt-2"
+              className="text-xs font-medium text-primary hover:underline mt-2 focus-ring"
             >
               + Add course override
             </button>
           </div>
 
-          {error && <p className="text-red-600 text-xs">{error}</p>}
+          {error && <p className="text-error text-xs">{error}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={() => setShowForm(false)} className="text-sm text-gray-500 hover:underline">
+            <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>
               Cancel
-            </button>
-            <button disabled={submitting} type="submit" className="rounded-lg bg-brand-green text-white px-4 py-2 hover:bg-green-800 disabled:opacity-60">
+            </Button>
+            <Button type="submit" variant="success" disabled={submitting}>
               {submitting ? 'Saving…' : 'Save trainer'}
-            </button>
+            </Button>
           </div>
         </form>
       </Modal>
@@ -175,50 +174,44 @@ export default function TrainersPage() {
         />
         <div className="flex gap-2 shrink-0">
           {['active', 'archived'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setStatusTab(t)}
-              className={`text-sm rounded-lg px-4 py-2 capitalize ${
-                statusTab === t ? 'bg-brand-blue text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
-            >
+            <Button key={t} variant={statusTab === t ? 'primary' : 'secondary'} className="capitalize" onClick={() => setStatusTab(t)}>
               {t}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">#</th>
-              <th className="px-4 py-3">Trainer ID</th>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3">Phone</th>
-              <th className="px-4 py-3">Place</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3"></th>
+              <th className="table-head-cell">#</th>
+              <th className="table-head-cell">Trainer ID</th>
+              <th className="table-head-cell">Name</th>
+              <th className="table-head-cell">Phone</th>
+              <th className="table-head-cell">Place</th>
+              <th className="table-head-cell">Status</th>
+              <th className="table-head-cell"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((t, i) => (
-              <tr key={t.id} className="border-t border-gray-100">
-                <td className="px-4 py-3 text-gray-400">{i + 1}</td>
-                <td className="px-4 py-3 font-mono text-xs">{t.trainer_id}</td>
-                <td className="px-4 py-3">
-                  <Link to={`/admin/trainers/${t.id}`} className="text-brand-blue hover:underline">{t.name}</Link>
+              <tr key={t.id} className="table-row">
+                <td className="table-cell text-text-tertiary">{i + 1}</td>
+                <td className="table-cell font-mono text-xs">{t.trainer_id}</td>
+                <td className="table-cell">
+                  <Link to={`/admin/trainers/${t.id}`} className="font-medium text-primary hover:underline focus-ring">{t.name}</Link>
                 </td>
-                <td className="px-4 py-3">{t.phone_number}</td>
-                <td className="px-4 py-3">{t.place}</td>
-                <td className="px-4 py-3"><Badge status={t.status} /></td>
-                <td className="px-4 py-3 text-right">
+                <td className="table-cell">{t.phone_number}</td>
+                <td className="table-cell">{t.place}</td>
+                <td className="table-cell"><Badge status={t.status} /></td>
+                <td className="table-cell text-right">
                   {t.status === 'active' ? (
-                    <button onClick={() => handleArchive(t.id)} className="text-xs text-gray-500 hover:text-red-600">
+                    <button onClick={() => handleArchive(t.id)} className="text-xs text-text-secondary hover:text-error focus-ring">
                       Archive
                     </button>
                   ) : (
-                    <button onClick={() => handleUnarchive(t.id)} className="text-xs text-gray-500 hover:text-brand-green">
+                    <button onClick={() => handleUnarchive(t.id)} className="text-xs text-text-secondary hover:text-success focus-ring">
                       Unarchive
                     </button>
                   )}
@@ -226,7 +219,7 @@ export default function TrainersPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-gray-400">No trainers found.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">No trainers found.</td></tr>
             )}
           </tbody>
         </table>
