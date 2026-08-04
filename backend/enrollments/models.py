@@ -29,6 +29,12 @@ class Enrollment(models.Model):
     class_time = models.TimeField(null=True, blank=True)
     class_days = models.CharField(max_length=50, blank=True, default='', help_text='Comma-separated day codes, e.g. MON,WED,FRI')
 
+    class Meta:
+        # find_schedule_conflict() filters on exactly this combination (trainer,
+        # status='ongoing', class_time) on every transfer/substitute-assignment
+        # request — see the performance audit.
+        indexes = [models.Index(fields=['trainer', 'status', 'class_time'])]
+
     def __str__(self):
         return f'{self.student.name} — {self.course.name} (batch {self.batch_number})'
 
@@ -84,6 +90,10 @@ class SubstituteAssignment(models.Model):
 
     class Meta:
         ordering = ['-start_date']
+        # MyStudentsView and find_schedule_conflict() both check "is there an
+        # active/overlapping substitute assignment for this trainer" — see the
+        # performance audit.
+        indexes = [models.Index(fields=['substitute_trainer', 'start_date', 'end_date'])]
 
     def __str__(self):
         return f'{self.substitute_trainer.name} covering {self.enrollment} ({self.start_date}..{self.end_date})'
@@ -150,6 +160,9 @@ class PaymentInstallment(models.Model):
 
     class Meta:
         ordering = ['sequence']
+        # compute_admin_alerts() filters PaymentInstallment.objects.filter(paid_status=
+        # 'pending') with no other predicate — an unscoped whole-table filter otherwise.
+        indexes = [models.Index(fields=['paid_status'])]
 
     def __str__(self):
         return f'{self.plan.enrollment} — installment {self.sequence} — ₹{self.amount}'

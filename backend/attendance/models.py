@@ -23,6 +23,11 @@ class Attendance(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['enrollment', 'date'], name='unique_attendance_per_enrollment_date')
         ]
+        # status='present' + a date range is the dominant filter shape across the
+        # billing services (trainer_totals_for_range, b2c_totals_for_range,
+        # calculate_payouts_for_cycle, calculate_client_invoices_for_cycle,
+        # client_totals) and the CSV report views — see the performance audit.
+        indexes = [models.Index(fields=['status', 'date'])]
 
     def __str__(self):
         return f'{self.enrollment} — {self.date} ({self.status})'

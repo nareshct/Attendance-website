@@ -143,6 +143,9 @@ class ClientInvoice(models.Model):
 
     class Meta:
         unique_together = ('client', 'cycle')
+        # compute_admin_alerts() and ClientViewSet.summary/earnings all filter on
+        # status='pending' paired with the cycle's own status — see the performance audit.
+        indexes = [models.Index(fields=['status', 'cycle'])]
 
     def __str__(self):
         return f'{self.client.company_name} — {self.cycle} — ₹{self.total_amount}'

@@ -20,6 +20,9 @@ class AuditLog(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        # AuditLogViewSet's list relies on ORDER BY -created_at for every page —
+        # Meta.ordering alone doesn't create an index, see the performance audit.
+        indexes = [models.Index(fields=['-created_at'])]
 
     def __str__(self):
         return f'{self.action} — {self.object_repr}'
