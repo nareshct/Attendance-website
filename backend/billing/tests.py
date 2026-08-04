@@ -22,6 +22,7 @@ from .invoice_pdf import render_invoice_pdf
 from .models import BillingCycle, ClientInvoice, CycleRevenueSnapshot, Payout
 from .services import (
     b2c_totals_for_range,
+    calculate_payouts_for_cycle,
     compute_admin_alerts,
     cycle_bounds_for_date,
     cycle_revenue_totals,
@@ -332,6 +333,51 @@ class BillingCycleCloseTests(APITestCase):
 
         self.cycle.refresh_from_db()
         self.assertEqual(self.cycle.status, 'open')
+
+
+class BillingCalculationFailureLoggingTests(TestCase):
+    """See billing/services.py — calculate_payouts_for_cycle/
+    calculate_client_invoices_for_cycle/snapshot_cycle_revenue each log the
+    exception via logger.exception() before re-raising, so a mid-calculation
+    failure reaches the LOGGING destination (mail_admins) instead of vanishing
+    into an unwatched console. Wrapped inside the shared service functions
+    rather than in BillingCycleViewSet.close()/close_billing_cycle.py
+    separately, so every caller (the close action, the CLI command, and
+    cycle_revenue_totals()'s lazy snapshot backfill) is covered by one log
+    line instead of the same failure being logged twice."""
+
+    def setUp(self):
+        from students.models import Student
+
+        self.cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='open',
+        )
+        self.trainer = _make_trainer('trainer_calc_failure', Decimal('100'))
+        self.course = Course.objects.create(name='Calc Failure Course', total_classes=24, rate_per_class=Decimal('300'))
+        self.student = Student.objects.create(name='Calc Failure Kid', grade='5', source_type='B2C')
+        self.enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        Attendance.objects.create(
+            enrollment=self.enrollment, date=datetime.date(2026, 1, 5), status='present', marked_by=self.trainer,
+        )
+
+    def test_calculate_payouts_for_cycle_logs_before_reraising(self):
+        with mock.patch('billing.services.trainer_totals_for_range', side_effect=RuntimeError('boom')):
+            with self.assertLogs('billing.services', level='ERROR') as logs:
+                with self.assertRaises(RuntimeError):
+                    calculate_payouts_for_cycle(self.cycle)
+
+        self.assertTrue(any('calculate_payouts_for_cycle failed' in message for message in logs.output))
+
+    def test_snapshot_cycle_revenue_logs_before_reraising(self):
+        with mock.patch('billing.services.b2c_current_cycle_totals', side_effect=RuntimeError('boom')):
+            with self.assertLogs('billing.services', level='ERROR') as logs:
+                with self.assertRaises(RuntimeError):
+                    snapshot_cycle_revenue(self.cycle)
+
+        self.assertTrue(any('snapshot_cycle_revenue failed' in message for message in logs.output))
 
 
 class InvoicePdfEscapesUserTextTests(TestCase):

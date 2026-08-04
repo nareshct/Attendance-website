@@ -1,4 +1,5 @@
 import calendar
+import logging
 from datetime import date
 from decimal import Decimal
 
@@ -28,6 +29,8 @@ from .models import (
 # rate — used so a lookup for any real, pre-existing class date resolves to that
 # original value rather than finding no history at all. See log_rate_change().
 RATE_HISTORY_EPOCH = date(2000, 1, 1)
+
+logger = logging.getLogger(__name__)
 
 
 def log_rate_change(entity, course, old_rate, new_rate, effective_date=None):
@@ -376,34 +379,38 @@ def calculate_payouts_for_cycle(cycle):
     this cycle pays. Trainers with no present attendance and no adjustment are
     left without a Payout row.
     """
-    trainer_ids = set(
-        Attendance.objects.filter(
-            status='present',
-            date__gte=cycle.cycle_start,
-            date__lte=cycle.cycle_end,
-        ).values_list('marked_by_id', flat=True)
-    )
-    trainer_ids |= set(
-        PayoutAdjustment.objects.filter(applied_cycle=cycle).values_list('trainer_id', flat=True)
-    )
-
-    payouts = []
-    for trainer in Trainer.objects.filter(id__in=trainer_ids):
-        total_classes, total_amount = trainer_totals_for_range(trainer, cycle.cycle_start, cycle.cycle_end)
-
-        adjustments = PayoutAdjustment.objects.filter(trainer=trainer, applied_cycle=cycle)
-        adjustment_total = adjustments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        total_classes += adjustments.count()
-        total_amount += adjustment_total
-
-        payout, _ = Payout.objects.update_or_create(
-            trainer=trainer,
-            cycle=cycle,
-            defaults={'total_classes': total_classes, 'total_amount': total_amount},
+    try:
+        trainer_ids = set(
+            Attendance.objects.filter(
+                status='present',
+                date__gte=cycle.cycle_start,
+                date__lte=cycle.cycle_end,
+            ).values_list('marked_by_id', flat=True)
         )
-        payouts.append(payout)
+        trainer_ids |= set(
+            PayoutAdjustment.objects.filter(applied_cycle=cycle).values_list('trainer_id', flat=True)
+        )
 
-    return payouts
+        payouts = []
+        for trainer in Trainer.objects.filter(id__in=trainer_ids):
+            total_classes, total_amount = trainer_totals_for_range(trainer, cycle.cycle_start, cycle.cycle_end)
+
+            adjustments = PayoutAdjustment.objects.filter(trainer=trainer, applied_cycle=cycle)
+            adjustment_total = adjustments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            total_classes += adjustments.count()
+            total_amount += adjustment_total
+
+            payout, _ = Payout.objects.update_or_create(
+                trainer=trainer,
+                cycle=cycle,
+                defaults={'total_classes': total_classes, 'total_amount': total_amount},
+            )
+            payouts.append(payout)
+
+        return payouts
+    except Exception:
+        logger.exception('calculate_payouts_for_cycle failed for cycle %s (%s to %s)', cycle.id, cycle.cycle_start, cycle.cycle_end)
+        raise
 
 
 def calculate_client_invoices_for_cycle(cycle):
@@ -416,35 +423,39 @@ def calculate_client_invoices_for_cycle(cycle):
     invoiced, so they ride along with whatever this cycle bills.
     Clients with no present attendance and no adjustment are left without an invoice row.
     """
-    client_ids = set(
-        Attendance.objects.filter(
-            status='present',
-            date__gte=cycle.cycle_start,
-            date__lte=cycle.cycle_end,
-            enrollment__student__client__isnull=False,
-        ).values_list('enrollment__student__client_id', flat=True)
-    )
-    client_ids |= set(
-        ClientInvoiceAdjustment.objects.filter(applied_cycle=cycle).values_list('client_id', flat=True)
-    )
-
-    invoices = []
-    for client in Client.objects.filter(id__in=client_ids):
-        totals = client_totals(client, cycle.cycle_start, cycle.cycle_end)
-
-        adjustments = ClientInvoiceAdjustment.objects.filter(client=client, applied_cycle=cycle)
-        adjustment_total = adjustments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-        total_classes = totals['total_classes'] + adjustments.count()
-        total_amount = totals['total_revenue'] + adjustment_total
-
-        invoice, _ = ClientInvoice.objects.update_or_create(
-            client=client,
-            cycle=cycle,
-            defaults={'total_classes': total_classes, 'total_amount': total_amount},
+    try:
+        client_ids = set(
+            Attendance.objects.filter(
+                status='present',
+                date__gte=cycle.cycle_start,
+                date__lte=cycle.cycle_end,
+                enrollment__student__client__isnull=False,
+            ).values_list('enrollment__student__client_id', flat=True)
         )
-        invoices.append(invoice)
+        client_ids |= set(
+            ClientInvoiceAdjustment.objects.filter(applied_cycle=cycle).values_list('client_id', flat=True)
+        )
 
-    return invoices
+        invoices = []
+        for client in Client.objects.filter(id__in=client_ids):
+            totals = client_totals(client, cycle.cycle_start, cycle.cycle_end)
+
+            adjustments = ClientInvoiceAdjustment.objects.filter(client=client, applied_cycle=cycle)
+            adjustment_total = adjustments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            total_classes = totals['total_classes'] + adjustments.count()
+            total_amount = totals['total_revenue'] + adjustment_total
+
+            invoice, _ = ClientInvoice.objects.update_or_create(
+                client=client,
+                cycle=cycle,
+                defaults={'total_classes': total_classes, 'total_amount': total_amount},
+            )
+            invoices.append(invoice)
+
+        return invoices
+    except Exception:
+        logger.exception('calculate_client_invoices_for_cycle failed for cycle %s (%s to %s)', cycle.id, cycle.cycle_start, cycle.cycle_end)
+        raise
 
 
 def snapshot_cycle_revenue(cycle):
@@ -472,29 +483,33 @@ def snapshot_cycle_revenue(cycle):
     """
     as_of = cycle.cycle_end
 
-    b2b_classes = 0
-    b2b_revenue = Decimal('0.00')
-    b2b_trainer_cost = Decimal('0.00')
-    for client in Client.objects.all():
-        totals = client_current_cycle_totals(client, cycle=cycle, as_of=as_of)
-        b2b_classes += totals['total_classes']
-        b2b_revenue += totals['total_revenue']
-        b2b_trainer_cost += totals['trainer_cost']
+    try:
+        b2b_classes = 0
+        b2b_revenue = Decimal('0.00')
+        b2b_trainer_cost = Decimal('0.00')
+        for client in Client.objects.all():
+            totals = client_current_cycle_totals(client, cycle=cycle, as_of=as_of)
+            b2b_classes += totals['total_classes']
+            b2b_revenue += totals['total_revenue']
+            b2b_trainer_cost += totals['trainer_cost']
 
-    b2c = b2c_current_cycle_totals(cycle, as_of=as_of)
+        b2c = b2c_current_cycle_totals(cycle, as_of=as_of)
 
-    snapshot, _ = CycleRevenueSnapshot.objects.update_or_create(
-        cycle=cycle,
-        defaults={
-            'b2b_classes': b2b_classes,
-            'b2b_revenue': b2b_revenue,
-            'b2b_trainer_cost': b2b_trainer_cost,
-            'b2c_classes': b2c['total_classes'],
-            'b2c_revenue': b2c['total_revenue'],
-            'b2c_trainer_cost': b2c['trainer_cost'],
-        },
-    )
-    return snapshot
+        snapshot, _ = CycleRevenueSnapshot.objects.update_or_create(
+            cycle=cycle,
+            defaults={
+                'b2b_classes': b2b_classes,
+                'b2b_revenue': b2b_revenue,
+                'b2b_trainer_cost': b2b_trainer_cost,
+                'b2c_classes': b2c['total_classes'],
+                'b2c_revenue': b2c['total_revenue'],
+                'b2c_trainer_cost': b2c['trainer_cost'],
+            },
+        )
+        return snapshot
+    except Exception:
+        logger.exception('snapshot_cycle_revenue failed for cycle %s (%s to %s)', cycle.id, cycle.cycle_start, cycle.cycle_end)
+        raise
 
 
 def cycle_revenue_totals(cycle):
