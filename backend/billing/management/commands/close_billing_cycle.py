@@ -1,7 +1,12 @@
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from billing.models import BillingCycle
-from billing.services import calculate_client_invoices_for_cycle, calculate_payouts_for_cycle
+from billing.services import (
+    calculate_client_invoices_for_cycle,
+    calculate_payouts_for_cycle,
+    snapshot_cycle_revenue,
+)
 
 
 class Command(BaseCommand):
@@ -26,10 +31,20 @@ class Command(BaseCommand):
         if cycle.status != 'open':
             raise CommandError(f'Cycle {cycle.id} is already {cycle.status}.')
 
-        payouts = calculate_payouts_for_cycle(cycle)
-        invoices = calculate_client_invoices_for_cycle(cycle)
-        cycle.status = 'closed'
-        cycle.save(update_fields=['status'])
+        # Locked for the duration of this transaction, matching
+        # BillingCycleViewSet.close() — so a failure partway through can't leave
+        # Payout/ClientInvoice rows committed while the cycle itself stays open,
+        # and a concurrent close via the API can't race this command.
+        with transaction.atomic():
+            cycle = BillingCycle.objects.select_for_update().get(pk=cycle.id)
+            if cycle.status != 'open':
+                raise CommandError(f'Cycle {cycle.id} is already {cycle.status}.')
+
+            payouts = calculate_payouts_for_cycle(cycle)
+            invoices = calculate_client_invoices_for_cycle(cycle)
+            snapshot_cycle_revenue(cycle)
+            cycle.status = 'closed'
+            cycle.save(update_fields=['status'])
 
         self.stdout.write(self.style.SUCCESS(
             f'Closed cycle {cycle.cycle_start} to {cycle.cycle_end}: '

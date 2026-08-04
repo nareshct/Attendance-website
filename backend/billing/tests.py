@@ -1,6 +1,7 @@
 import datetime
 from decimal import Decimal
 from io import StringIO
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -389,7 +390,29 @@ class CloseBillingCycleCommandTests(TestCase):
         self.assertEqual(self.cycle.status, 'closed')
         self.assertTrue(Payout.objects.filter(trainer=self.trainer, cycle=self.cycle).exists())
         self.assertTrue(ClientInvoice.objects.filter(client=self.client_obj, cycle=self.cycle).exists())
+        # Regression coverage: the CLI command used to skip snapshot_cycle_revenue()
+        # entirely, unlike BillingCycleViewSet.close() — a cycle closed via this
+        # command must get the same frozen CycleRevenueSnapshot as one closed via the API.
+        self.assertTrue(CycleRevenueSnapshot.objects.filter(cycle=self.cycle).exists())
         self.assertIn('Closed cycle', out.getvalue())
+
+    def test_failure_partway_through_rolls_back_everything(self):
+        # Payout calculation succeeds first, then client invoice calculation blows up —
+        # the whole close must roll back as one unit (see the command's
+        # transaction.atomic() block), not leave a committed Payout with the cycle
+        # still 'open' and no ClientInvoice/CycleRevenueSnapshot.
+        with mock.patch(
+            'billing.management.commands.close_billing_cycle.calculate_client_invoices_for_cycle',
+            side_effect=RuntimeError('simulated failure mid-close'),
+        ):
+            with self.assertRaises(RuntimeError):
+                call_command('close_billing_cycle', self.cycle.id)
+
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'open')
+        self.assertFalse(Payout.objects.filter(cycle=self.cycle).exists())
+        self.assertFalse(ClientInvoice.objects.filter(cycle=self.cycle).exists())
+        self.assertFalse(CycleRevenueSnapshot.objects.filter(cycle=self.cycle).exists())
 
     def test_defaults_to_the_oldest_open_cycle_when_no_id_given(self):
         out = StringIO()
