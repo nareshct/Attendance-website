@@ -43,9 +43,13 @@ it matters.
 
 1. Point it at the `frontend/` directory of this repo, build command `npm run build`,
    output directory `dist`.
-2. Set the env var `VITE_API_BASE_URL` to your Render backend's URL (e.g.
+2. **Before triggering a build**, set the env var `VITE_API_BASE_URL` in the hosting
+   platform's dashboard (Vercel: Project Settings → Environment Variables; Netlify:
+   Site configuration → Environment variables) to your Render backend's URL (e.g.
    `https://attendance-backend.onrender.com`) — this is baked in at build time, so
    changing it later requires a redeploy of the frontend (not just a settings change).
+   `vite build` refuses to run at all if this isn't set (see `vite.config.js`), rather
+   than silently shipping a bundle that calls `undefined/api/...`.
 3. Deploy.
 
 ## 4. Optional: custom domain
