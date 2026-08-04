@@ -249,6 +249,70 @@ EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
 EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER or 'no-reply@localhost')
+# The "From" address on error emails specifically (see LOGGING/ADMINS below) —
+# separate from DEFAULT_FROM_EMAIL since some SMTP providers reject a From address
+# that doesn't match the authenticated account.
+SERVER_EMAIL = config('SERVER_EMAIL', default=EMAIL_HOST_USER or 'no-reply@localhost')
 
 # Base URL of the frontend — used to build the link inside the password-reset email.
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
+
+# Who gets emailed on an unhandled 500/exception (see LOGGING below) — e.g.
+# "Admin One:admin1@example.com,Admin Two:admin2@example.com". Empty by default: Django's
+# mail_admins() silently no-ops if ADMINS is empty, so this is safe to leave unset in dev.
+ADMINS = config(
+    'ADMINS', default='',
+    cast=lambda v: [tuple(pair.split(':', 1)) for pair in v.split(',') if ':' in pair],
+)
+
+# No external error tracker (Sentry/Rollbar/etc.) is set up yet — on Render, console
+# output is lost on every dyno restart/redeploy, so without this an unhandled 500 would
+# be invisible unless someone happened to be watching the live log stream at that exact
+# moment. mail_admins is Django's built-in fallback: it emails everyone in ADMINS (via
+# the EMAIL_BACKEND configured above) with the traceback whenever something logs at
+# ERROR level or above through the 'django' logger — which includes every unhandled
+# view exception, since Django's exception-handling middleware logs there automatically.
+# Only fires when DEBUG=False (RequireDebugFalse), so local dev doesn't get spammed.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+    },
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'mail_admins': {
+            'level': 'ERROR',
+            'filters': ['require_debug_false'],
+            'class': 'django.utils.log.AdminEmailHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console', 'mail_admins'],
+        'level': 'INFO',
+    },
+    # Explicit and non-propagating so a 'django'-namespaced log (e.g. the
+    # exception-handling middleware's 500 log) is handled exactly once here, instead
+    # of also bubbling up to root's identical handlers and sending two emails.
+    # Everything else (e.g. logger.exception() calls elsewhere in the app) has no
+    # specific entry, so it falls through to root's handlers as normal.
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'mail_admins'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

@@ -1,8 +1,10 @@
+import logging
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework.authtoken.models import Token
@@ -187,3 +189,29 @@ class PasswordResetConfirmViewTests(TestCase):
         }, format='json')
         response = PasswordResetConfirmView.as_view()(request)
         self.assertEqual(response.status_code, 400)
+
+
+class ErrorLoggingEmailsAdminsTests(TestCase):
+    """See LOGGING in config/settings.py — an ERROR-level log through the 'django'
+    logger must reach ADMINS by email, since Render's console output doesn't survive
+    a dyno restart and no external error tracker is configured."""
+
+    @override_settings(DEBUG=False, ADMINS=[('Test Admin', 'admin@example.com')])
+    def test_error_level_log_emails_admins_when_debug_is_false(self):
+        logger = logging.getLogger('django')
+        try:
+            raise ValueError('simulated error for logging test')
+        except ValueError:
+            logger.error('Simulated unhandled exception', exc_info=True)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('admin@example.com', mail.outbox[0].to)
+        self.assertIn('simulated error for logging test', mail.outbox[0].body)
+
+    @override_settings(DEBUG=True, ADMINS=[('Test Admin', 'admin@example.com')])
+    def test_error_level_log_does_not_email_admins_when_debug_is_true(self):
+        # RequireDebugFalse must keep this quiet during local dev.
+        logger = logging.getLogger('django')
+        logger.error('Simulated error during local dev')
+
+        self.assertEqual(len(mail.outbox), 0)

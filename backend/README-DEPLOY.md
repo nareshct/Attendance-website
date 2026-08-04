@@ -30,6 +30,11 @@ changes needed.
    - Email vars (`EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, etc.) if you want the
      "forgot password" email to actually send instead of just logging to Render's
      console
+   - `ADMINS` — e.g. `Admin One:admin1@example.com,Admin Two:admin2@example.com` — who
+     gets emailed the traceback when an unhandled 500 happens (see `LOGGING` in
+     `config/settings.py`). Requires the email vars above to actually be set too;
+     without both, an unhandled 500 is only visible in Render's console output, which is
+     lost on the next restart/redeploy
 4. Deploy. First request after idle time will be slow (~30-50s) — free tier sleeps
    after inactivity; the Neon database itself is unaffected by this.
 5. Create an admin user on the live database:
