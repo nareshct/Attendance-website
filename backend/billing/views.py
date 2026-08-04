@@ -86,6 +86,8 @@ class ClientInvoiceViewSet(ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def mark_received(self, request, pk=None):
         invoice = self.get_object()
+        if invoice.status == 'received':
+            return Response({'detail': 'Invoice is already marked as received.'}, status=400)
         invoice.status = 'received'
         invoice.save(update_fields=['status'])
         log_action(
@@ -125,6 +127,8 @@ class PayoutViewSet(ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
         payout = self.get_object()
+        if payout.paid_status == 'paid':
+            return Response({'detail': 'Payout is already marked as paid.'}, status=400)
         payout.paid_status = 'paid'
         payout.save(update_fields=['paid_status'])
         log_action(

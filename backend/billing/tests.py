@@ -9,6 +9,7 @@ from django.test import TestCase
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
 from attendance.models import Attendance
+from audit.models import AuditLog
 from clients.models import Client
 from clients.services import client_totals
 from courses.models import Course
@@ -26,7 +27,7 @@ from .services import (
     historical_rate,
     snapshot_cycle_revenue,
 )
-from .views import BillingCycleViewSet, CycleRevenueHistoryView
+from .views import BillingCycleViewSet, ClientInvoiceViewSet, CycleRevenueHistoryView, PayoutViewSet
 
 
 def _make_trainer(username, rate):
@@ -411,3 +412,116 @@ class CloseBillingCycleCommandTests(TestCase):
     def test_raises_command_error_for_unknown_cycle_id(self):
         with self.assertRaises(CommandError):
             call_command('close_billing_cycle', 999999)
+
+
+class ClientInvoiceMarkReceivedTests(APITestCase):
+    """See ClientInvoiceViewSet.mark_received() — flips a B2B client's invoice
+    to 'received' once they've actually paid it."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_mark_received', password='x', is_staff=True)
+        self.client_obj = Client.objects.create(
+            company_name='Mark Received Co', contact_phone='123', rate_per_class=Decimal('200'),
+        )
+        self.cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='closed',
+        )
+        self.invoice = ClientInvoice.objects.create(
+            client=self.client_obj, cycle=self.cycle, total_classes=5, total_amount=Decimal('1000.00'), status='pending',
+        )
+        self.factory = APIRequestFactory()
+
+    def _mark_received(self, user):
+        request = self.factory.post(f'/api/client-invoices/{self.invoice.id}/mark_received/')
+        force_authenticate(request, user=user)
+        return ClientInvoiceViewSet.as_view({'post': 'mark_received'})(request, pk=self.invoice.id)
+
+    def test_mark_received_flips_status_and_logs_it(self):
+        response = self._mark_received(self.admin)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'received')
+
+        log = AuditLog.objects.filter(action='invoice_mark_received').latest('created_at')
+        self.assertIn('Mark Received Co', log.object_repr)
+        self.assertIn('1000', log.detail)
+
+    def test_non_admin_cannot_mark_received(self):
+        trainer_user = get_user_model().objects.create_user(username='trainer_mark_received_denied', password='x')
+        Trainer.objects.create(
+            user=trainer_user, name='Denied Trainer', phone_number='0000000000', place='Here', default_rate_per_class=Decimal('100'),
+        )
+        response = self._mark_received(trainer_user)
+        self.assertEqual(response.status_code, 403)
+
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'pending')
+
+    def test_marking_an_already_received_invoice_is_rejected_and_does_not_reprocess(self):
+        first = self._mark_received(self.admin)
+        self.assertEqual(first.status_code, 200, first.data)
+        log_count_after_first = AuditLog.objects.filter(action='invoice_mark_received').count()
+
+        second = self._mark_received(self.admin)
+        self.assertEqual(second.status_code, 400)
+        self.assertIn('already', second.data['detail'])
+
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'received')
+        # The rejected second call didn't write another audit log entry.
+        self.assertEqual(AuditLog.objects.filter(action='invoice_mark_received').count(), log_count_after_first)
+
+
+class PayoutMarkPaidTests(APITestCase):
+    """See PayoutViewSet.mark_paid() — flips a trainer's payout to 'paid' once
+    they've actually been paid."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_mark_paid', password='x', is_staff=True)
+        self.trainer = _make_trainer('trainer_mark_paid', Decimal('100'))
+        self.cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='closed',
+        )
+        self.payout = Payout.objects.create(
+            trainer=self.trainer, cycle=self.cycle, total_classes=5, total_amount=Decimal('500.00'), paid_status='pending',
+        )
+        self.factory = APIRequestFactory()
+
+    def _mark_paid(self, user):
+        request = self.factory.post(f'/api/payouts/{self.payout.id}/mark_paid/')
+        force_authenticate(request, user=user)
+        return PayoutViewSet.as_view({'post': 'mark_paid'})(request, pk=self.payout.id)
+
+    def test_mark_paid_flips_status_and_logs_it(self):
+        response = self._mark_paid(self.admin)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.payout.refresh_from_db()
+        self.assertEqual(self.payout.paid_status, 'paid')
+
+        log = AuditLog.objects.filter(action='payout_mark_paid').latest('created_at')
+        self.assertIn('trainer_mark_paid', log.object_repr)
+        self.assertIn('500', log.detail)
+
+    def test_non_admin_cannot_mark_paid(self):
+        other_trainer = _make_trainer('trainer_mark_paid_denied', Decimal('100'))
+        response = self._mark_paid(other_trainer.user)
+        self.assertEqual(response.status_code, 403)
+
+        self.payout.refresh_from_db()
+        self.assertEqual(self.payout.paid_status, 'pending')
+
+    def test_marking_an_already_paid_payout_is_rejected_and_does_not_reprocess(self):
+        first = self._mark_paid(self.admin)
+        self.assertEqual(first.status_code, 200, first.data)
+        log_count_after_first = AuditLog.objects.filter(action='payout_mark_paid').count()
+
+        second = self._mark_paid(self.admin)
+        self.assertEqual(second.status_code, 400)
+        self.assertIn('already', second.data['detail'])
+
+        self.payout.refresh_from_db()
+        self.assertEqual(self.payout.paid_status, 'paid')
+        # The rejected second call didn't write another audit log entry.
+        self.assertEqual(AuditLog.objects.filter(action='payout_mark_paid').count(), log_count_after_first)
