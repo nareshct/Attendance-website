@@ -29,6 +29,43 @@ const EMPTY_FORM = {
   payment_type: '', discount_percent: '0', classes_total: '24',
 }
 
+// Mirrors Trainer.has_rate_for() — an explicit per-course override, or the trainer's
+// default rate. Only pre-checks what's already loaded client-side; the backend
+// (EnrollmentSerializer.validate()) remains the authoritative check either way.
+function trainerHasRateForCourse(trainer, courseId) {
+  if (!trainer || !courseId) return true
+  const hasOverride = (trainer.course_rates || []).some((r) => String(r.course) === String(courseId))
+  if (hasOverride) return true
+  return trainer.default_rate_per_class != null
+}
+
+// Mirrors find_schedule_conflict() in enrollments/services.py: same trainer, same
+// class_time, at least one overlapping class_day, on either the trainer's own ongoing
+// enrollments or anything they're currently covering as a substitute. Only checks
+// against enrollments/substitute assignments already loaded client-side — a best-effort
+// pre-check, not a replacement for the backend's own check.
+function findScheduleConflict(trainerId, classTime, classDays, enrollments, substituteAssignments, excludeEnrollmentId = null) {
+  if (!trainerId || !classTime || classDays.length === 0) return null
+  const daysSet = new Set(classDays)
+  const overlapsDays = (days) => (days || '').split(',').some((d) => daysSet.has(d))
+
+  const own = enrollments.find((e) =>
+    String(e.trainer) === String(trainerId) && e.status === 'ongoing' && e.id !== excludeEnrollmentId &&
+    (e.class_time || '').slice(0, 5) === classTime && overlapsDays(e.class_days)
+  )
+  if (own) return own
+
+  for (const sa of substituteAssignments) {
+    if (String(sa.substitute_trainer) !== String(trainerId)) continue
+    const covered = enrollments.find((e) => e.id === sa.enrollment)
+    if (!covered || covered.id === excludeEnrollmentId) continue
+    if ((covered.class_time || '').slice(0, 5) === classTime && overlapsDays(covered.class_days)) {
+      return covered
+    }
+  }
+  return null
+}
+
 export default function EnrollmentsPage() {
   const api = useApi()
   const [students, setStudents] = useState([])
@@ -105,6 +142,28 @@ export default function EnrollmentsPage() {
       setError('Select at least one class day.')
       return
     }
+
+    const selectedTrainer = trainers.find((t) => String(t.id) === form.trainer)
+    if (selectedTrainer && selectedCourse && !trainerHasRateForCourse(selectedTrainer, selectedCourse.id)) {
+      setError(
+        `${selectedTrainer.name} has no rate set for ${selectedCourse.name} — set a default rate or add a course override first.`
+      )
+      return
+    }
+
+    const conflict = findScheduleConflict(form.trainer, form.class_time, form.class_days, enrollments, substituteAssignments)
+    if (selectedTrainer && conflict) {
+      setError(
+        `${selectedTrainer.name} already has a class at that time — ${conflict.student_name} (${conflict.course_name}). Choose a different time or trainer.`
+      )
+      return
+    }
+
+    if (selectedStudent?.source_type === 'B2C' && selectedCourse && !selectedCourse.rate_per_class) {
+      setError(`${selectedCourse.name} has no B2C rate set — set one on the Courses page first.`)
+      return
+    }
+
     setSubmitting(true)
     setError('')
     try {

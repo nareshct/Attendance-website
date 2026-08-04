@@ -130,7 +130,7 @@ export default function StudentsPage() {
 
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add student" maxWidthClass="max-w-2xl">
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <input required placeholder="Student name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input sm:col-span-2" />
+          <input required maxLength={255} placeholder="Student name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input sm:col-span-2" />
 
           <select required value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} className="input">
             <option value="">Select grade…</option>
@@ -154,9 +154,9 @@ export default function StudentsPage() {
           )}
 
           <p className="sm:col-span-2 text-xs text-gray-400 -mb-1">Optional — parent details</p>
-          <input placeholder="Parent name" value={form.parent_name} onChange={(e) => setForm({ ...form, parent_name: e.target.value })} className="input" />
-          <input placeholder="Parent phone" value={form.parent_phone_number} onChange={(e) => setForm({ ...form, parent_phone_number: e.target.value })} className="input" />
-          <input placeholder="Place" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} className="input" />
+          <input maxLength={255} placeholder="Parent name" value={form.parent_name} onChange={(e) => setForm({ ...form, parent_name: e.target.value })} className="input" />
+          <input maxLength={20} placeholder="Parent phone" value={form.parent_phone_number} onChange={(e) => setForm({ ...form, parent_phone_number: e.target.value })} className="input" />
+          <input maxLength={255} placeholder="Place" value={form.place} onChange={(e) => setForm({ ...form, place: e.target.value })} className="input" />
 
           <p className="sm:col-span-2 text-xs text-gray-400 -mt-1">
             Course, trainer, schedule, and payment plan are set up next in Enrollments.

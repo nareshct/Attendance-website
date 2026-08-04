@@ -388,7 +388,7 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Name</label>
-                <input required value={profileForm?.name ?? ''} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} className="input" />
+                <input required maxLength={255} value={profileForm?.name ?? ''} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} className="input" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Grade</label>
@@ -420,15 +420,15 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
               )}
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Parent name</label>
-                <input value={profileForm?.parent_name ?? ''} onChange={(e) => setProfileForm({ ...profileForm, parent_name: e.target.value })} className="input" />
+                <input maxLength={255} value={profileForm?.parent_name ?? ''} onChange={(e) => setProfileForm({ ...profileForm, parent_name: e.target.value })} className="input" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Parent phone</label>
-                <input value={profileForm?.parent_phone_number ?? ''} onChange={(e) => setProfileForm({ ...profileForm, parent_phone_number: e.target.value })} className="input" />
+                <input maxLength={20} value={profileForm?.parent_phone_number ?? ''} onChange={(e) => setProfileForm({ ...profileForm, parent_phone_number: e.target.value })} className="input" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Place</label>
-                <input value={profileForm?.place ?? ''} onChange={(e) => setProfileForm({ ...profileForm, place: e.target.value })} className="input" />
+                <input maxLength={255} value={profileForm?.place ?? ''} onChange={(e) => setProfileForm({ ...profileForm, place: e.target.value })} className="input" />
               </div>
             </div>
             {profileError && <p className="text-red-600 text-xs">{profileError}</p>}

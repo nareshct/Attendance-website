@@ -83,6 +83,15 @@ export default function MarkAttendancePage() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    // Mirrors AttendanceSerializer.validate()'s duplicate check — only sees this
+    // trainer's own visible history, so a class already marked by someone else
+    // covering the same enrollment still falls through to the backend's own check.
+    const alreadyMarked = history.some((h) => String(h.enrollment) === String(form.enrollment) && h.date === form.date)
+    if (alreadyMarked) {
+      setError('Attendance for this class on this date has already been marked.')
+      return
+    }
+
     setSubmitting(true)
     setError('')
     setSuccess('')
