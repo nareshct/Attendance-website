@@ -39,6 +39,7 @@ export function SearchableSelect({ options, value, onChange, placeholder = 'Sear
       <input
         type="text"
         placeholder={placeholder}
+        aria-label={placeholder}
         value={open ? query : selected ? selected.label : ''}
         onFocus={() => {
           setOpen(true)
@@ -58,7 +59,7 @@ export function SearchableSelect({ options, value, onChange, placeholder = 'Sear
             <button
               type="button"
               key={o.value}
-              onMouseDown={() => {
+              onClick={() => {
                 onChange(String(o.value))
                 setOpen(false)
                 setQuery('')
