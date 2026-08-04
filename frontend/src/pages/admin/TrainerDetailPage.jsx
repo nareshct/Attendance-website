@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
 import { Card } from '../../components/Card'
@@ -67,17 +67,17 @@ export default function TrainerDetailPage() {
   const [profileError, setProfileError] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
 
-  async function loadTrainer() {
+  const loadTrainer = useCallback(async () => {
     setTrainer(await api(`/api/trainers/${id}/`))
-  }
+  }, [api, id])
 
-  function loadCurrentCycle() {
+  const loadCurrentCycle = useCallback(() => {
     return api(`/api/trainers/${id}/current-cycle/`).then(setCurrentCycle)
-  }
+  }, [api, id])
 
-  function loadAttendance() {
+  const loadAttendance = useCallback(() => {
     return api(`/api/attendance/?trainer=${id}`).then(setAttendance)
-  }
+  }, [api, id])
 
   useEffect(() => {
     loadTrainer().catch((err) => setError(err.message))
@@ -86,7 +86,7 @@ export default function TrainerDetailPage() {
     api(`/api/enrollments/?trainer=${id}`).then(setEnrollments).catch(() => {})
     loadCurrentCycle().catch(() => {})
     loadAttendance().catch(() => {})
-  }, [api, id])
+  }, [api, id, loadTrainer, loadCurrentCycle, loadAttendance])
 
   function openDeleteAttendance(attendanceId) {
     setDeletingAttendanceId(attendanceId)

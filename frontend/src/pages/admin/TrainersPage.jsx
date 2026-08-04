@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
 import { Card } from '../../components/Card'
@@ -20,10 +20,10 @@ export default function TrainersPage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  async function loadTrainers() {
+  const loadTrainers = useCallback(async () => {
     const path = debouncedSearch ? `/api/trainers/?search=${encodeURIComponent(debouncedSearch)}` : '/api/trainers/'
     setTrainers(await api(path))
-  }
+  }, [api, debouncedSearch])
 
   // Debounced so rapid typing doesn't fire a request per keystroke — the actual search
   // runs server-side (see TrainerViewSet.search_fields), so it always covers every
@@ -35,7 +35,7 @@ export default function TrainersPage() {
 
   useEffect(() => {
     loadTrainers().catch((err) => setError(err.message))
-  }, [api, debouncedSearch])
+  }, [loadTrainers])
 
   useEffect(() => {
     api('/api/courses/').then(setCourses).catch(() => {})

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../hooks/useAuth'
 import { GlobalSearch } from './GlobalSearch'
 
 export default function Layout({ title, navItems, accentClass }) {

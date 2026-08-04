@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { formatDate } from '../../utils/date'
 import { formatDays, formatTime } from '../../utils/schedule'
@@ -22,13 +22,13 @@ export default function TrainerBatchesPage() {
   const [logError, setLogError] = useState('')
   const [logging, setLogging] = useState(false)
 
-  function loadBatches() {
+  const loadBatches = useCallback(() => {
     return api('/api/my-batches/').then(setBatches)
-  }
+  }, [api])
 
   useEffect(() => {
     loadBatches().catch((err) => setError(err.message))
-  }, [api])
+  }, [loadBatches])
 
   useEffect(() => {
     batches.forEach((b) => {

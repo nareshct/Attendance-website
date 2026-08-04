@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiUpload, downloadFile } from '../../api/client'
 import { Badge } from '../../components/Badge'
@@ -6,7 +6,7 @@ import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Modal } from '../../components/Modal'
 import { SearchableSelect } from '../../components/SearchableSelect'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { usePaginatedList } from '../../hooks/usePaginatedList'
 import { formatDate } from '../../utils/date'
@@ -76,18 +76,18 @@ export default function BatchDetailPage() {
   const [editingInstallmentAmount, setEditingInstallmentAmount] = useState('')
   const [installmentEditError, setInstallmentEditError] = useState('')
 
-  function loadBatch() {
+  const loadBatch = useCallback(() => {
     return api(`/api/batches/${id}/`).then(setBatch)
-  }
-  function loadRevenue() {
+  }, [api, id])
+  const loadRevenue = useCallback(() => {
     return api(`/api/batches/${id}/revenue/`).then(setRevenue)
-  }
-  function loadSessions() {
+  }, [api, id])
+  const loadSessions = useCallback(() => {
     return api(`/api/batch-sessions/?batch=${id}`).then(setSessions)
-  }
-  function loadPayouts() {
+  }, [api, id])
+  const loadPayouts = useCallback(() => {
     return api(`/api/batch-payouts/?batch=${id}`).then(setPayouts)
-  }
+  }, [api, id])
 
   const [studentSearch, setStudentSearch] = useState('')
   const [debouncedStudentSearch, setDebouncedStudentSearch] = useState('')
@@ -119,7 +119,7 @@ export default function BatchDetailPage() {
     // Only used as autocomplete suggestions below — a batch trainer isn't required to be
     // a registered trainer, so this list doesn't restrict what can be typed/added.
     api('/api/trainers/').then((t) => setTrainers(t.filter((x) => x.status === 'active'))).catch(() => {})
-  }, [api, id])
+  }, [api, id, loadBatch, loadRevenue, loadSessions, loadPayouts])
 
   function openEditBatch() {
     setBatchForm({

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Card } from '../../components/Card'
 import { useApi } from '../../hooks/useApi'
@@ -11,13 +11,13 @@ export default function AttendanceRequestsPage() {
   const [busyId, setBusyId] = useState(null)
   const [search, setSearch] = useState('')
 
-  async function loadRequests() {
+  const loadRequests = useCallback(async () => {
     setRequests(await api('/api/attendance-requests/'))
-  }
+  }, [api])
 
   useEffect(() => {
     loadRequests().catch((err) => setError(err.message))
-  }, [api])
+  }, [loadRequests])
 
   async function handleApprove(id) {
     setBusyId(id)

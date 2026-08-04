@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { login as apiLogin, logout as apiLogout } from '../api/client'
+import { AuthContext } from './auth-context-object'
 
-const AuthContext = createContext(null)
 const STORAGE_KEY = 'attendance_auth'
 
 export function AuthProvider({ children }) {
@@ -40,10 +40,4 @@ export function AuthProvider({ children }) {
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
-  return ctx
 }

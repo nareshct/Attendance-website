@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { apiUpload, downloadFile } from '../../api/client'
 import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Modal } from '../../components/Modal'
 import { SearchableSelect } from '../../components/SearchableSelect'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { formatDate } from '../../utils/date'
 
@@ -22,14 +22,14 @@ export default function CourseMaterialsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [busy, setBusy] = useState('')
 
-  async function loadMaterials() {
+  const loadMaterials = useCallback(async () => {
     setMaterials(await api('/api/course-materials/'))
-  }
+  }, [api])
 
   useEffect(() => {
     loadMaterials().catch((err) => setError(err.message))
     api('/api/courses/').then(setCourses).catch(() => {})
-  }, [api])
+  }, [api, loadMaterials])
 
   async function handleSubmit(e) {
     e.preventDefault()

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
 import { useApi } from '../../hooks/useApi'
@@ -18,13 +18,13 @@ export default function CoursesPage() {
   const [editError, setEditError] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
 
-  async function loadCourses() {
+  const loadCourses = useCallback(async () => {
     setCourses(await api('/api/courses/'))
-  }
+  }, [api])
 
   useEffect(() => {
     loadCourses().catch((err) => setError(err.message))
-  }, [api])
+  }, [loadCourses])
 
   async function handleSubmit(e) {
     e.preventDefault()

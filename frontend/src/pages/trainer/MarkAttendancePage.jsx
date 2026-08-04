@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
@@ -55,9 +55,9 @@ export default function MarkAttendancePage() {
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
 
-  async function loadHistory() {
+  const loadHistory = useCallback(async () => {
     setHistory(await api('/api/attendance/'))
-  }
+  }, [api])
 
   const lastCycleStart = lastCycleBoundsFor(new Date()).start
   const visibleHistory = history.filter((h) => h.date >= lastCycleStart)
@@ -71,15 +71,15 @@ export default function MarkAttendancePage() {
     .map((r) => ({ id: `denied-${r.id}`, denied: true, date: r.date, student_name: r.student_name, course_name: r.course_name, topic_covered: r.topic_covered }))
   const combinedHistory = [...visibleHistory, ...deniedRecent].sort((a, b) => b.date.localeCompare(a.date))
 
-  async function loadRequests() {
+  const loadRequests = useCallback(async () => {
     setRequests(await api('/api/attendance-requests/'))
-  }
+  }, [api])
 
   useEffect(() => {
     api('/api/my-students/').then((e) => setEnrollments(e.filter((x) => x.status === 'ongoing' && !x.payment_blocked))).catch((err) => setError(err.message))
     loadHistory().catch(() => {})
     loadRequests().catch(() => {})
-  }, [api])
+  }, [api, loadHistory, loadRequests])
 
   async function handleSubmit(e) {
     e.preventDefault()

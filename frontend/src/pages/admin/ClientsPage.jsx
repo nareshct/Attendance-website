@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
 import { Card, StatCard } from '../../components/Card'
@@ -18,18 +18,18 @@ export default function ClientsPage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  async function loadClients() {
+  const loadClients = useCallback(async () => {
     setClients(await api('/api/clients/'))
-  }
+  }, [api])
 
-  function loadSummary() {
+  const loadSummary = useCallback(() => {
     return api('/api/clients/summary/').then(setSummary)
-  }
+  }, [api])
 
   useEffect(() => {
     loadClients().catch((err) => setError(err.message))
     loadSummary().catch(() => {})
-  }, [api])
+  }, [loadClients, loadSummary])
 
   async function handleSubmit(e) {
     e.preventDefault()

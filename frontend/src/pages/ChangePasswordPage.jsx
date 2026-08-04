@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { changePassword, getMe, updateEmail } from '../api/client'
 import { Card } from '../components/Card'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../hooks/useAuth'
 
 export default function ChangePasswordPage() {
   const { auth } = useAuth()

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { downloadFile } from '../../api/client'
 import { Badge } from '../../components/Badge'
 import { Card } from '../../components/Card'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { formatDateRange } from '../../utils/date'
 
@@ -16,7 +16,7 @@ export default function PayoutsPage() {
   const [busy, setBusy] = useState(false)
   const [showAllCycles, setShowAllCycles] = useState(false)
 
-  async function loadAll() {
+  const loadAll = useCallback(async () => {
     const [c, p] = await Promise.all([api('/api/billing-cycles/'), api('/api/payouts/')])
     setCycles(c)
     setPayouts(p)
@@ -30,11 +30,11 @@ export default function PayoutsPage() {
       previewsByCycle[cycle.id] = previews[i]
     })
     setCurrentPayouts(previewsByCycle)
-  }
+  }, [api])
 
   useEffect(() => {
     loadAll().catch((err) => setError(err.message))
-  }, [api])
+  }, [loadAll])
 
   async function handleGenerateCurrent() {
     setBusy(true)

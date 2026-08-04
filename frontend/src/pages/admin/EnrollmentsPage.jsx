@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
@@ -57,9 +57,9 @@ export default function EnrollmentsPage() {
     reload: loadEnrollments, loadMore, loadLess, page,
   } = usePaginatedList(enrollmentsPath)
 
-  async function loadSubstituteAssignments() {
+  const loadSubstituteAssignments = useCallback(async () => {
     setSubstituteAssignments(await api('/api/substitute-assignments/'))
-  }
+  }, [api])
 
   useEffect(() => {
     loadEnrollments().catch((err) => setError(err.message))
@@ -70,7 +70,7 @@ export default function EnrollmentsPage() {
     api('/api/courses/').then(setCourses).catch(() => {})
     api('/api/trainers/').then((t) => setTrainers(t.filter((x) => x.status === 'active'))).catch(() => {})
     loadSubstituteAssignments().catch(() => {})
-  }, [api])
+  }, [api, loadSubstituteAssignments])
 
   function toggleDay(code) {
     setForm((f) => ({

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { downloadFile } from '../api/client'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../hooks/useAuth'
 import { useApi } from '../hooks/useApi'
 import { formatDate } from '../utils/date'
 import { formatDays, formatTime } from '../utils/schedule'
@@ -52,13 +52,13 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
   const [parentLinkError, setParentLinkError] = useState('')
   const [copied, setCopied] = useState(false)
 
-  function loadProfile() {
+  const loadProfile = useCallback(() => {
     return api(`/api/students/${studentId}/profile/`).then(setProfile)
-  }
+  }, [api, studentId])
 
   useEffect(() => {
     loadProfile().catch((err) => setError(err.message))
-  }, [api, studentId])
+  }, [loadProfile])
 
   useEffect(() => {
     if (allowTransfer) {

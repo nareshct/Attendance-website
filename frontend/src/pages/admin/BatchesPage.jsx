@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
 import { Card, StatCard } from '../../components/Card'
@@ -55,9 +55,9 @@ export default function BatchesPage() {
     reloadBatches().catch((err) => setError(err.message))
   }, [reloadBatches])
 
-  function loadSummary() {
+  const loadSummary = useCallback(() => {
     return api('/api/batches/summary/').then(setSummary)
-  }
+  }, [api])
 
   useEffect(() => {
     loadSummary().catch(() => {})
@@ -65,7 +65,7 @@ export default function BatchesPage() {
     // Only used as autocomplete suggestions below — a batch trainer isn't required to be
     // a registered trainer, so this list doesn't restrict what can be typed/added.
     api('/api/trainers/').then((t) => setTrainers(t.filter((x) => x.status === 'active'))).catch(() => {})
-  }, [api])
+  }, [api, loadSummary])
 
   function loadSourceBreakdown() {
     setShowSourceBreakdown(true)

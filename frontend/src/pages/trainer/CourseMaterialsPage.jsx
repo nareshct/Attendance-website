@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { downloadFile } from '../../api/client'
 import { Card } from '../../components/Card'
 import { SearchableSelect } from '../../components/SearchableSelect'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { formatDate } from '../../utils/date'
 

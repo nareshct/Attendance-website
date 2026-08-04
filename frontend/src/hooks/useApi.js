@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiRequest } from '../api/client'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from './useAuth'
 
 export function useApi() {
   const { auth, logout } = useAuth()

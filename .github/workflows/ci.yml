@@ -60,3 +60,5 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_API_BASE_URL: https://ci-build-placeholder.example.com

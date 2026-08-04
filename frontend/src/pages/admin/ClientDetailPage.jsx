@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { downloadFile } from '../../api/client'
 import { Badge } from '../../components/Badge'
@@ -6,7 +6,7 @@ import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Modal } from '../../components/Modal'
 import { TrendChart } from '../../components/TrendChart'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { formatDate, formatDateRange } from '../../utils/date'
 
@@ -41,21 +41,21 @@ export default function ClientDetailPage() {
   const [savingContact, setSavingContact] = useState(false)
   const [deletingContactId, setDeletingContactId] = useState(null)
 
-  async function loadClient() {
+  const loadClient = useCallback(async () => {
     setClient(await api(`/api/clients/${id}/`))
-  }
+  }, [api, id])
 
-  function loadInvoices() {
+  const loadInvoices = useCallback(() => {
     return api(`/api/client-invoices/?client=${id}`).then(setInvoices)
-  }
+  }, [api, id])
 
-  function loadCurrentCycle() {
+  const loadCurrentCycle = useCallback(() => {
     return api(`/api/clients/${id}/earnings/`).then(setCurrentCycle)
-  }
+  }, [api, id])
 
-  function loadHistory() {
+  const loadHistory = useCallback(() => {
     return api(`/api/clients/${id}/earnings_history/?limit=12`).then(setHistory)
-  }
+  }, [api, id])
 
   useEffect(() => {
     loadClient().catch((err) => setError(err.message))
@@ -64,7 +64,7 @@ export default function ClientDetailPage() {
     loadInvoices().catch(() => {})
     loadCurrentCycle().catch(() => {})
     loadHistory().catch(() => {})
-  }, [api, id])
+  }, [api, id, loadClient, loadInvoices, loadCurrentCycle, loadHistory])
 
   async function handleDownloadInvoice(invoiceId) {
     setDownloadingId(invoiceId)
