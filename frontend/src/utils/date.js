@@ -6,6 +6,15 @@ export function formatDate(value) {
   return `${d}/${m}/${y}`
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+export function formatWeekday(value) {
+  if (!value) return ''
+  const [y, m, d] = String(value).slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return ''
+  return WEEKDAYS[new Date(y, m - 1, d).getDay()]
+}
+
 export function formatDateRange(start, end) {
   return `${formatDate(start)} – ${formatDate(end)}`
 }

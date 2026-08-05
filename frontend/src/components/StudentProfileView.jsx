@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { downloadFile } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 import { useApi } from '../hooks/useApi'
-import { formatDate } from '../utils/date'
+import { formatDate, formatWeekday } from '../utils/date'
 import { formatDays, formatTime } from '../utils/schedule'
 import { Badge } from './Badge'
 import { Button } from './Button'
@@ -529,37 +529,67 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
               <div className="mt-3 border-t border-gray-100 pt-3">
                 {loadingSessions === e.id && <p className="text-xs text-text-tertiary">Loading…</p>}
                 {sessionsByEnrollment[e.id] && sessionsByEnrollment[e.id].length === 0 && (
-                  <p className="text-xs text-text-tertiary">No classes taken yet.</p>
+                  <div className="rounded-lg border border-dashed border-gray-200 py-6 text-center">
+                    <p className="text-xs text-text-tertiary">No classes taken yet.</p>
+                  </div>
                 )}
                 {sessionsByEnrollment[e.id] && sessionsByEnrollment[e.id].length > 0 && (
-                  <table className="w-full text-xs">
-                    <thead className="text-text-secondary text-left">
-                      <tr>
-                        <th className="py-1 pr-4">Date</th>
-                        <th className="py-1">Topic covered</th>
-                        {allowEdit && <th className="py-1"></th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sessionsByEnrollment[e.id].map((s) => (
-                        <tr key={s.id} className="border-t border-gray-50">
-                          <td className="py-1 pr-4">{formatDate(s.date)}</td>
-                          <td className="py-1 text-text-secondary">{s.topic_covered || '—'}</td>
-                          {allowEdit && (
-                            <td className="py-1 pl-4 text-right whitespace-nowrap">
-                              {s.in_closed_cycle ? (
-                                <span className="text-text-tertiary">Locked</span>
-                              ) : (
-                                <button onClick={() => openDeleteSession(e.id, s.id)} className="font-medium text-error hover:underline focus-ring">
-                                  Delete
-                                </button>
-                              )}
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <>
+                    <p className="text-xs text-text-secondary mb-2">
+                      {sessionsByEnrollment[e.id].length} class{sessionsByEnrollment[e.id].length === 1 ? '' : 'es'} recorded
+                    </p>
+                    <div className="rounded-lg border border-gray-100 overflow-hidden">
+                      <table className="table">
+                        <thead>
+                          <tr className="table-head-row">
+                            <th className="table-head-cell w-12">#</th>
+                            <th className="table-head-cell">Date</th>
+                            <th className="table-head-cell">Topic covered</th>
+                            {allowEdit && <th className="table-head-cell"></th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessionsByEnrollment[e.id].map((s, idx) => {
+                            const num = sessionsByEnrollment[e.id].length - idx
+                            const isSubstitute = s.marked_by_name && s.marked_by_name !== e.trainer_name
+                            return (
+                              <tr key={s.id} className="table-row">
+                                <td className="table-cell">
+                                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary-tint text-primary text-[11px] font-semibold tabular-nums">
+                                    {num}
+                                  </span>
+                                </td>
+                                <td className="table-cell whitespace-nowrap">
+                                  <div className="font-medium text-navy">{formatDate(s.date)}</div>
+                                  <div className="text-xs text-text-tertiary">
+                                    {formatWeekday(s.date)}
+                                    {idx === 0 && <span className="ml-1.5 text-primary">· Most recent</span>}
+                                  </div>
+                                </td>
+                                <td className="table-cell text-text-secondary">
+                                  {s.topic_covered || '—'}
+                                  {isSubstitute && (
+                                    <div className="mt-0.5 text-xs text-warning">via substitute — {s.marked_by_name}</div>
+                                  )}
+                                </td>
+                                {allowEdit && (
+                                  <td className="table-cell text-right whitespace-nowrap">
+                                    {s.in_closed_cycle ? (
+                                      <span className="text-text-tertiary text-xs">Locked</span>
+                                    ) : (
+                                      <button onClick={() => openDeleteSession(e.id, s.id)} className="text-xs font-medium text-error hover:underline focus-ring">
+                                        Delete
+                                      </button>
+                                    )}
+                                  </td>
+                                )}
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 )}
               </div>
             )}
