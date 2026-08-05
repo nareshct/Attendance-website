@@ -170,6 +170,9 @@ class AttendanceRequestViewSet(ReadOnlyModelViewSet):
         qs = AttendanceRequest.objects.select_related('enrollment__student', 'enrollment__course', 'requested_by')
         if not self.request.user.is_staff:
             qs = qs.filter(requested_by=self.request.user.trainer)
+        trainer_id = self.request.query_params.get('trainer')
+        if trainer_id:
+            qs = qs.filter(requested_by_id=trainer_id)
         return qs
 
     @action(detail=True, methods=['post'])

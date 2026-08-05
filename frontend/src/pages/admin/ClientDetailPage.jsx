@@ -36,11 +36,14 @@ export default function ClientDetailPage() {
   const [rateForm, setRateForm] = useState({ course: '', rate_per_class: '' })
   const [submitting, setSubmitting] = useState(false)
   const [deletingRateId, setDeletingRateId] = useState(null)
+  const [rateError, setRateError] = useState('')
 
   const [showContactForm, setShowContactForm] = useState(false)
   const [contactForm, setContactForm] = useState(EMPTY_CONTACT)
   const [savingContact, setSavingContact] = useState(false)
   const [deletingContactId, setDeletingContactId] = useState(null)
+  const [contactError, setContactError] = useState('')
+  const [editingContactId, setEditingContactId] = useState(null)
 
   const loadClient = useCallback(async () => {
     setClient(await api(`/api/clients/${id}/`))
@@ -95,7 +98,7 @@ export default function ClientDetailPage() {
   async function handleAddRate(e) {
     e.preventDefault()
     setSubmitting(true)
-    setError('')
+    setRateError('')
     try {
       await api('/api/client-rates/', {
         method: 'POST',
@@ -106,7 +109,7 @@ export default function ClientDetailPage() {
       await loadClient()
       await loadCurrentCycle()
     } catch (err) {
-      setError(err.message)
+      setRateError(err.message)
     } finally {
       setSubmitting(false)
     }
@@ -117,30 +120,66 @@ export default function ClientDetailPage() {
   async function handleDeleteRate() {
     const rateId = rateDeleteTarget
     setDeletingRateId(rateId)
-    setError('')
+    setRateError('')
     try {
       await api(`/api/client-rates/${rateId}/`, { method: 'DELETE' })
       setRateDeleteTarget(null)
       await loadClient()
       await loadCurrentCycle()
     } catch (err) {
-      setError(err.message)
+      setRateError(err.message)
     } finally {
       setDeletingRateId(null)
     }
   }
 
+  const [editingRateId, setEditingRateId] = useState(null)
+  const [editingRateAmount, setEditingRateAmount] = useState('')
+
+  function openEditRate(rate) {
+    setEditingRateId(rate.id)
+    setEditingRateAmount(rate.rate_per_class)
+    setRateError('')
+  }
+
+  async function handleSaveRateEdit(rateId) {
+    setSubmitting(true)
+    setRateError('')
+    try {
+      await api(`/api/client-rates/${rateId}/`, { method: 'PATCH', body: { rate_per_class: editingRateAmount } })
+      setEditingRateId(null)
+      await loadClient()
+      await loadCurrentCycle()
+    } catch (err) {
+      setRateError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  function openEditContact(contact) {
+    setContactForm({ name: contact.name, role: contact.role, phone: contact.phone, email: contact.email })
+    setEditingContactId(contact.id)
+    setContactError('')
+    setShowContactForm(true)
+  }
+
   async function handleAddContact(e) {
     e.preventDefault()
     setSavingContact(true)
-    setError('')
+    setContactError('')
     try {
-      await api('/api/client-contacts/', { method: 'POST', body: { client: Number(id), ...contactForm } })
+      if (editingContactId) {
+        await api(`/api/client-contacts/${editingContactId}/`, { method: 'PATCH', body: contactForm })
+      } else {
+        await api('/api/client-contacts/', { method: 'POST', body: { client: Number(id), ...contactForm } })
+      }
       setContactForm(EMPTY_CONTACT)
+      setEditingContactId(null)
       setShowContactForm(false)
       await loadClient()
     } catch (err) {
-      setError(err.message)
+      setContactError(err.message)
     } finally {
       setSavingContact(false)
     }
@@ -151,13 +190,13 @@ export default function ClientDetailPage() {
   async function handleDeleteContact() {
     const contactId = contactDeleteTarget
     setDeletingContactId(contactId)
-    setError('')
+    setContactError('')
     try {
       await api(`/api/client-contacts/${contactId}/`, { method: 'DELETE' })
       setContactDeleteTarget(null)
       await loadClient()
     } catch (err) {
-      setError(err.message)
+      setContactError(err.message)
     } finally {
       setDeletingContactId(null)
     }
@@ -171,6 +210,8 @@ export default function ClientDetailPage() {
       rate_per_class: client.rate_per_class ?? '',
     })
     setProfileError('')
+    setContactError('')
+    setRateError('')
     setEditingProfile(true)
   }
 
@@ -180,8 +221,12 @@ export default function ClientDetailPage() {
     setProfileError('')
     setShowContactForm(false)
     setContactForm(EMPTY_CONTACT)
+    setContactError('')
+    setEditingContactId(null)
     setShowRateForm(false)
     setRateForm({ course: '', rate_per_class: '' })
+    setRateError('')
+    setEditingRateId(null)
   }
 
   async function handleSaveProfile(e) {
@@ -200,7 +245,7 @@ export default function ClientDetailPage() {
     }
   }
 
-  if (error) return <p className="text-error text-sm">{error}</p>
+  if (error && !client) return <p className="text-error text-sm">{error}</p>
   if (!client) return <p className="text-text-tertiary text-sm">Loading…</p>
 
   const ratedCourseIds = new Set(client.course_rates.map((r) => r.course))
@@ -214,6 +259,8 @@ export default function ClientDetailPage() {
         <h1 className="text-2xl font-semibold text-navy">{client.company_name}</h1>
         {!editingProfile && <Button variant="success" onClick={openEditProfile}>Edit details</Button>}
       </div>
+
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       <Card className="mb-6">
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
@@ -283,7 +330,16 @@ export default function ClientDetailPage() {
         <div className="mt-6 pt-6 border-t border-gray-100">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-navy">Additional contacts</h3>
-            <button type="button" onClick={() => setShowContactForm((v) => !v)} className="text-xs font-medium text-primary hover:underline focus-ring">
+            <button
+              type="button"
+              onClick={() => {
+                setShowContactForm((v) => !v)
+                setContactForm(EMPTY_CONTACT)
+                setEditingContactId(null)
+                setContactError('')
+              }}
+              className="text-xs font-medium text-primary hover:underline focus-ring"
+            >
               {showContactForm ? 'Cancel' : '+ Add contact'}
             </button>
           </div>
@@ -294,8 +350,9 @@ export default function ClientDetailPage() {
               <input placeholder="Role (e.g. Billing)" value={contactForm.role} onChange={(e) => setContactForm({ ...contactForm, role: e.target.value })} className="input" />
               <input placeholder="Phone" value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} className="input" />
               <input placeholder="Email" value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} className="input" />
+              {contactError && <p className="sm:col-span-4 text-error text-xs">{contactError}</p>}
               <Button disabled={savingContact} type="submit" variant="success" className="sm:col-span-4">
-                {savingContact ? 'Saving…' : 'Save contact'}
+                {savingContact ? 'Saving…' : editingContactId ? 'Update contact' : 'Save contact'}
               </Button>
             </form>
           )}
@@ -310,13 +367,21 @@ export default function ClientDetailPage() {
                     {c.phone && <span className="text-text-secondary"> · {c.phone}</span>}
                     {c.email && <span className="text-text-secondary"> · {c.email}</span>}
                   </span>
-                  <button
-                    disabled={deletingContactId === c.id}
-                    onClick={() => setContactDeleteTarget(c.id)}
-                    className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring"
-                  >
-                    {deletingContactId === c.id ? 'Deleting…' : 'Delete'}
-                  </button>
+                  <span className="space-x-3">
+                    <button onClick={() => openEditContact(c)} className="text-xs font-medium text-primary hover:underline focus-ring">
+                      Edit
+                    </button>
+                    <button
+                      disabled={deletingContactId === c.id}
+                      onClick={() => {
+                        setContactDeleteTarget(c.id)
+                        setContactError('')
+                      }}
+                      className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring"
+                    >
+                      {deletingContactId === c.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -328,7 +393,14 @@ export default function ClientDetailPage() {
         <div className="mt-6 pt-6 border-t border-gray-100">
           <div className="flex items-center justify-between mb-1">
             <h3 className="text-sm font-semibold text-navy">Course-specific overrides</h3>
-            <button type="button" onClick={() => setShowRateForm((v) => !v)} className="text-xs font-medium text-primary hover:underline focus-ring">
+            <button
+              type="button"
+              onClick={() => {
+                setShowRateForm((v) => !v)
+                setRateError('')
+              }}
+              className="text-xs font-medium text-primary hover:underline focus-ring"
+            >
               {showRateForm ? 'Cancel' : '+ Add override'}
             </button>
           </div>
@@ -343,6 +415,7 @@ export default function ClientDetailPage() {
               <Button disabled={submitting} type="submit" variant="success">
                 {submitting ? 'Saving…' : 'Save rate'}
               </Button>
+              {rateError && <p className="sm:col-span-3 text-error text-xs">{rateError}</p>}
             </form>
           )}
 
@@ -351,13 +424,21 @@ export default function ClientDetailPage() {
               {client.course_rates.map((r) => (
                 <li key={r.id} className="flex items-center justify-between text-sm">
                   <span>{r.course_name} <span className="text-text-secondary">· ₹{r.rate_per_class}</span></span>
-                  <button
-                    disabled={deletingRateId === r.id}
-                    onClick={() => setRateDeleteTarget(r.id)}
-                    className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring"
-                  >
-                    {deletingRateId === r.id ? 'Deleting…' : 'Delete'}
-                  </button>
+                  <span className="space-x-3">
+                    <button onClick={() => openEditRate(r)} className="text-xs font-medium text-primary hover:underline focus-ring">
+                      Edit
+                    </button>
+                    <button
+                      disabled={deletingRateId === r.id}
+                      onClick={() => {
+                        setRateDeleteTarget(r.id)
+                        setRateError('')
+                      }}
+                      className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring"
+                    >
+                      {deletingRateId === r.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -365,6 +446,35 @@ export default function ClientDetailPage() {
             <p className="text-sm text-text-tertiary">No overrides — every course uses the default rate.</p>
           )}
         </div>
+      </Modal>
+
+      <Modal open={editingRateId != null} onClose={() => setEditingRateId(null)} title="Edit rate override">
+        {(() => {
+          const target = client.course_rates.find((r) => r.id === editingRateId)
+          if (!target) return null
+          return (
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">{target.course_name}</p>
+              <input
+                type="number"
+                step="0.01"
+                autoFocus
+                value={editingRateAmount}
+                onChange={(e) => setEditingRateAmount(e.target.value)}
+                className="input"
+              />
+              {rateError && <p className="text-error text-xs">{rateError}</p>}
+              <div className="flex justify-end gap-3">
+                <Button type="button" variant="ghost" onClick={() => setEditingRateId(null)}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="success" disabled={submitting} onClick={() => handleSaveRateEdit(target.id)}>
+                  {submitting ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          )
+        })()}
       </Modal>
 
       {client.rate_per_class == null && (
@@ -514,6 +624,7 @@ export default function ClientDetailPage() {
         busyLabel="Deleting…"
         danger
         busy={deletingContactId === contactDeleteTarget}
+        error={contactError}
       />
 
       <ConfirmDialog
@@ -526,6 +637,7 @@ export default function ClientDetailPage() {
         busyLabel="Deleting…"
         danger
         busy={deletingRateId === rateDeleteTarget}
+        error={rateError}
       />
     </div>
   )

@@ -47,6 +47,7 @@ export default function TrainerDetailPage() {
   const [courses, setCourses] = useState([])
   const [enrollments, setEnrollments] = useState([])
   const [attendance, setAttendance] = useState([])
+  const [attendanceRequests, setAttendanceRequests] = useState([])
   const [error, setError] = useState('')
 
   const [deletingAttendanceId, setDeletingAttendanceId] = useState(null)
@@ -56,6 +57,7 @@ export default function TrainerDetailPage() {
   const [rateForm, setRateForm] = useState({ course: '', rate_per_class: '' })
   const [submitting, setSubmitting] = useState(false)
   const [deletingRateId, setDeletingRateId] = useState(null)
+  const [rateError, setRateError] = useState('')
 
   const [showResetForm, setShowResetForm] = useState(false)
   const [resetForm, setResetForm] = useState({ new_password: '', confirm_password: '' })
@@ -85,6 +87,7 @@ export default function TrainerDetailPage() {
     api(`/api/payouts/?trainer=${id}`).then(setPayouts).catch(() => {})
     api('/api/courses/').then(setCourses).catch(() => {})
     api(`/api/enrollments/?trainer=${id}`).then(setEnrollments).catch(() => {})
+    api(`/api/attendance-requests/?trainer=${id}`).then(setAttendanceRequests).catch(() => {})
     loadCurrentCycle().catch(() => {})
     loadAttendance().catch(() => {})
   }, [api, id, loadTrainer, loadCurrentCycle, loadAttendance])
@@ -118,7 +121,7 @@ export default function TrainerDetailPage() {
   async function handleAddRate(e) {
     e.preventDefault()
     setSubmitting(true)
-    setError('')
+    setRateError('')
     try {
       await api('/api/trainer-rates/', {
         method: 'POST',
@@ -129,7 +132,7 @@ export default function TrainerDetailPage() {
       await loadTrainer()
       await loadCurrentCycle()
     } catch (err) {
-      setError(err.message)
+      setRateError(err.message)
     } finally {
       setSubmitting(false)
     }
@@ -140,16 +143,40 @@ export default function TrainerDetailPage() {
   async function handleDeleteRate() {
     const rateId = rateDeleteTarget
     setDeletingRateId(rateId)
-    setError('')
+    setRateError('')
     try {
       await api(`/api/trainer-rates/${rateId}/`, { method: 'DELETE' })
       setRateDeleteTarget(null)
       await loadTrainer()
       await loadCurrentCycle()
     } catch (err) {
-      setError(err.message)
+      setRateError(err.message)
     } finally {
       setDeletingRateId(null)
+    }
+  }
+
+  const [editingRateId, setEditingRateId] = useState(null)
+  const [editingRateAmount, setEditingRateAmount] = useState('')
+
+  function openEditRate(rate) {
+    setEditingRateId(rate.id)
+    setEditingRateAmount(rate.rate_per_class)
+    setRateError('')
+  }
+
+  async function handleSaveRateEdit(rateId) {
+    setSubmitting(true)
+    setRateError('')
+    try {
+      await api(`/api/trainer-rates/${rateId}/`, { method: 'PATCH', body: { rate_per_class: editingRateAmount } })
+      setEditingRateId(null)
+      await loadTrainer()
+      await loadCurrentCycle()
+    } catch (err) {
+      setRateError(err.message)
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -161,6 +188,7 @@ export default function TrainerDetailPage() {
       default_rate_per_class: trainer.default_rate_per_class ?? '',
     })
     setProfileError('')
+    setRateError('')
     setEditingProfile(true)
   }
 
@@ -170,6 +198,8 @@ export default function TrainerDetailPage() {
     setProfileError('')
     setShowRateForm(false)
     setRateForm({ course: '', rate_per_class: '' })
+    setRateError('')
+    setEditingRateId(null)
   }
 
   async function handleSaveProfile(e) {
@@ -213,7 +243,7 @@ export default function TrainerDetailPage() {
     }
   }
 
-  if (error) return <p className="text-error text-sm">{error}</p>
+  if (error && !trainer) return <p className="text-error text-sm">{error}</p>
   if (!trainer) return <p className="text-text-tertiary text-sm">Loading…</p>
 
   const ratedCourseIds = new Set(trainer.course_rates.map((r) => r.course))
@@ -223,6 +253,13 @@ export default function TrainerDetailPage() {
   const visibleAttendance = attendance
     .filter((a) => a.date >= lastCycleStart)
     .sort((a, b) => b.date.localeCompare(a.date))
+
+  const approvedRequestsCount = attendanceRequests.filter((r) => r.status === 'approved').length
+  // Deliberately excludes the live, still-open current cycle — that amount isn't due
+  // yet (a cycle has to close before it becomes an actual Payout that can be marked paid).
+  const pendingPayoutTotal = payouts
+    .filter((p) => p.paid_status === 'pending')
+    .reduce((sum, p) => sum + Number(p.total_amount), 0)
 
   return (
     <div>
@@ -236,6 +273,8 @@ export default function TrainerDetailPage() {
         </div>
       </div>
 
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
+
       <Card className="mb-6">
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm mb-4">
           <div><dt className="text-text-secondary">Trainer ID</dt><dd className="font-mono">{trainer.trainer_id}</dd></div>
@@ -247,6 +286,18 @@ export default function TrainerDetailPage() {
           <div>
             <dt className="text-text-secondary">Default rate per class</dt>
             <dd>{trainer.default_rate_per_class != null ? `₹${trainer.default_rate_per_class}` : '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-text-secondary">Active students</dt>
+            <dd>{enrollments.filter((e) => e.status === 'ongoing').length}</dd>
+          </div>
+          <div>
+            <dt className="text-text-secondary">Late requests approved</dt>
+            <dd>{approvedRequestsCount}</dd>
+          </div>
+          <div>
+            <dt className="text-text-secondary">Payout pending</dt>
+            <dd>₹{pendingPayoutTotal}</dd>
           </div>
         </dl>
 
@@ -342,7 +393,14 @@ export default function TrainerDetailPage() {
         <div>
           <div className="flex items-center justify-between mb-1">
             <h3 className="text-sm font-semibold text-navy">Course-specific overrides</h3>
-            <button type="button" onClick={() => setShowRateForm((v) => !v)} className="text-xs font-medium text-primary hover:underline focus-ring">
+            <button
+              type="button"
+              onClick={() => {
+                setShowRateForm((v) => !v)
+                setRateError('')
+              }}
+              className="text-xs font-medium text-primary hover:underline focus-ring"
+            >
               {showRateForm ? 'Cancel' : '+ Add override'}
             </button>
           </div>
@@ -357,6 +415,7 @@ export default function TrainerDetailPage() {
               <Button disabled={submitting} type="submit" variant="success">
                 {submitting ? 'Saving…' : 'Save rate'}
               </Button>
+              {rateError && <p className="sm:col-span-3 text-error text-xs">{rateError}</p>}
             </form>
           )}
 
@@ -365,13 +424,21 @@ export default function TrainerDetailPage() {
               {trainer.course_rates.map((r) => (
                 <li key={r.id} className="flex items-center justify-between text-sm">
                   <span>{r.course_name} <span className="text-text-secondary">· ₹{r.rate_per_class}</span></span>
-                  <button
-                    disabled={deletingRateId === r.id}
-                    onClick={() => setRateDeleteTarget(r.id)}
-                    className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring"
-                  >
-                    {deletingRateId === r.id ? 'Deleting…' : 'Delete'}
-                  </button>
+                  <span className="space-x-3">
+                    <button onClick={() => openEditRate(r)} className="text-xs font-medium text-primary hover:underline focus-ring">
+                      Edit
+                    </button>
+                    <button
+                      disabled={deletingRateId === r.id}
+                      onClick={() => {
+                        setRateDeleteTarget(r.id)
+                        setRateError('')
+                      }}
+                      className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring"
+                    >
+                      {deletingRateId === r.id ? 'Deleting…' : 'Delete'}
+                    </button>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -379,6 +446,35 @@ export default function TrainerDetailPage() {
             <p className="text-sm text-text-tertiary">No overrides — every course uses the default rate.</p>
           )}
         </div>
+      </Modal>
+
+      <Modal open={editingRateId != null} onClose={() => setEditingRateId(null)} title="Edit rate override">
+        {(() => {
+          const target = trainer.course_rates.find((r) => r.id === editingRateId)
+          if (!target) return null
+          return (
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">{target.course_name}</p>
+              <input
+                type="number"
+                step="0.01"
+                autoFocus
+                value={editingRateAmount}
+                onChange={(e) => setEditingRateAmount(e.target.value)}
+                className="input"
+              />
+              {rateError && <p className="text-error text-xs">{rateError}</p>}
+              <div className="flex justify-end gap-3">
+                <Button type="button" variant="ghost" onClick={() => setEditingRateId(null)}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="success" disabled={submitting} onClick={() => handleSaveRateEdit(target.id)}>
+                  {submitting ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          )
+        })()}
       </Modal>
 
       <h2 className="text-lg font-semibold text-navy mb-3">Weekly class schedule</h2>
@@ -501,6 +597,7 @@ export default function TrainerDetailPage() {
         busyLabel="Deleting…"
         danger
         busy={deletingRateId === rateDeleteTarget}
+        error={rateError}
       />
     </div>
   )
