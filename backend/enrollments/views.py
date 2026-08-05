@@ -314,7 +314,7 @@ class MyStudentsView(ListAPIView):
     def _active_substitute_map(self):
         today = timezone.localdate()
         return {
-            assignment.enrollment_id: assignment.enrollment.trainer.name
+            assignment.enrollment_id: assignment
             for assignment in SubstituteAssignment.objects.filter(
                 substitute_trainer=self.request.user.trainer, start_date__lte=today, end_date__gte=today,
             ).select_related('enrollment__trainer')
@@ -342,6 +342,8 @@ class MyStudentsView(ListAPIView):
                 row['class_time'] = None
                 row['class_days'] = ''
             if enrollment.id in substitute_map:
-                row['covering_for'] = substitute_map[enrollment.id]
+                assignment = substitute_map[enrollment.id]
+                row['covering_for'] = assignment.enrollment.trainer.name
+                row['covering_until'] = assignment.end_date
             data.append(row)
         return Response(data)
