@@ -63,6 +63,29 @@ Put the backend behind a subdomain (e.g. `api.yourapp.com`) from the start. Then
 future host migration is just repointing that one DNS record — the frontend's
 `VITE_API_BASE_URL` never needs to change, so no frontend rebuild either.
 
+## 5. Scheduled tasks (optional)
+
+Nothing in this project runs on a schedule by itself — there's no Celery/APScheduler
+setup, just plain Django management commands meant to be triggered by whatever
+scheduler your host (or OS) provides. Both are safe to run daily and are no-ops when
+there's nothing to do, so it's fine to schedule them even before you need them:
+
+- `python manage.py send_admin_digest` — emails admins (see `ADMINS` env var, step 3
+  above) a summary of overdue B2B invoices and due-but-unpaid B2C installments — the
+  same "needs attention" cards the dashboard shows, for admins who don't have it open.
+- `python manage.py auto_archive_completed_students` — archives a student once **every**
+  one of their enrollments is finished (none still ongoing, at least one completed) and
+  30+ days have passed since the last class on a completed enrollment. A student with
+  one course done but another still in progress is left alone. Archiving here is
+  non-destructive (just a status flag — fully reversible from the Students page's
+  "Unarchive" button), so this is low-risk to leave running unattended.
+
+On Render specifically: "New +" → "Cron Job" (a separate service type from the web
+service), same repo/`rootDir: backend`/environment as the web service, with the
+command as the "Command" field and a schedule like `0 2 * * *` (daily at 2am). On any
+other host, or for local use, point `cron` (Linux/macOS) or Windows Task Scheduler at
+the same command instead.
+
 ## Moving to a different host later
 
 1. Set the same env vars (section 2, step 3 above) on the new host.
