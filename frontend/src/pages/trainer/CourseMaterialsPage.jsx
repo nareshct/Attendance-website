@@ -54,28 +54,28 @@ export default function CourseMaterialsPage() {
       </div>
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">Course</th>
-              <th className="px-4 py-3">Title</th>
-              <th className="px-4 py-3">Description</th>
-              <th className="px-4 py-3">Uploaded</th>
-              <th className="px-4 py-3"></th>
+              <th className="table-head-cell">Course</th>
+              <th className="table-head-cell">Title</th>
+              <th className="table-head-cell">Description</th>
+              <th className="table-head-cell">Uploaded</th>
+              <th className="table-head-cell"></th>
             </tr>
           </thead>
           <tbody>
             {materials.map((m) => (
-              <tr key={m.id} className="border-t border-gray-100">
-                <td className="px-4 py-3">{m.course_name}</td>
-                <td className="px-4 py-3">{m.title}</td>
-                <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{m.description}</td>
-                <td className="px-4 py-3">{formatDate(m.uploaded_at)}</td>
-                <td className="px-4 py-3 text-right">
+              <tr key={m.id} className="table-row">
+                <td className="table-cell">{m.course_name}</td>
+                <td className="table-cell">{m.title}</td>
+                <td className="table-cell text-gray-500 max-w-xs truncate">{m.description}</td>
+                <td className="table-cell">{formatDate(m.uploaded_at)}</td>
+                <td className="table-cell text-right">
                   <button
                     disabled={busy === m.id}
                     onClick={() => handleDownload(m.id)}
-                    className="text-brand-violet hover:underline disabled:opacity-60"
+                    className="text-brand-violet hover:underline disabled:opacity-60 focus-ring"
                   >
                     {busy === m.id ? 'Downloading…' : 'Download'}
                   </button>
@@ -83,7 +83,7 @@ export default function CourseMaterialsPage() {
               </tr>
             ))}
             {materials.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">No course materials yet.</td></tr>
+              <tr><td colSpan={5} className="table-cell text-center text-gray-400">No course materials yet.</td></tr>
             )}
           </tbody>
         </table>

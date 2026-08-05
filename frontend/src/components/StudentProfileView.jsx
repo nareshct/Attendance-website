@@ -156,6 +156,7 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
     setExpanded(enrollmentId)
     if (!sessionsByEnrollment[enrollmentId]) {
       setLoadingSessions(enrollmentId)
+      setError('')
       try {
         const sessions = await api(`/api/attendance/?enrollment=${enrollmentId}`)
         setSessionsByEnrollment((prev) => ({ ...prev, [enrollmentId]: sessions }))
@@ -297,8 +298,10 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
     })
   }
 
-  if (error) return <p className="text-error text-sm">{error}</p>
+  if (error && !profile) return <p className="text-error text-sm">{error}</p>
   if (!profile) return <p className="text-text-tertiary text-sm">Loading…</p>
+
+  const transferTarget = profile.enrollments.find((en) => en.id === transferId)
 
   return (
     <div>
@@ -318,6 +321,8 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
           )}
         </div>
       </div>
+
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
 
       {allowEdit && (
         <Modal open={showParentLink} onClose={toggleParentLink} title="Parent share link">
@@ -443,6 +448,40 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
         </Modal>
       )}
 
+      {allowTransfer && (
+        <Modal open={transferId != null} onClose={closeTransfer} title="Transfer student">
+          {transferTarget && (
+            <div className="space-y-3">
+              <p className="text-sm text-text-secondary">
+                {transferTarget.course_name} — Batch {transferTarget.batch_number}
+                <br />
+                Currently with <span className="font-medium text-navy">{transferTarget.trainer_name}</span>
+              </p>
+              <SearchableSelect
+                placeholder="Search trainer…"
+                value={transferTrainer}
+                onChange={setTransferTrainer}
+                options={trainers.filter((t) => t.id !== transferTarget.trainer).map((t) => ({ value: t.id, label: t.name }))}
+              />
+              {transferError && <p className="text-error text-xs">{transferError}</p>}
+              <div className="flex justify-end gap-3">
+                <Button type="button" variant="ghost" onClick={closeTransfer}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="success"
+                  disabled={!transferTrainer || transferring}
+                  onClick={() => handleTransfer(transferTarget.id)}
+                >
+                  {transferring ? 'Transferring…' : 'Confirm'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+
       <h2 className="text-lg font-semibold text-navy mb-3">Batch history</h2>
       {downloadReportError && <p className="text-error text-xs mb-3">{downloadReportError}</p>}
       {downloadCertificateError && <p className="text-error text-xs mb-3">{downloadCertificateError}</p>}
@@ -488,37 +527,11 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
               {e.class_days ? ` · ${formatDays(e.class_days)}${e.class_time ? ` at ${formatTime(e.class_time)}` : ''}` : ''}
             </p>
 
-            {allowTransfer && transferId === e.id && (
-              <div className="flex flex-col items-start gap-2 mb-2">
-                <div className="min-w-[10rem]">
-                  <SearchableSelect
-                    placeholder="Search trainer…"
-                    value={transferTrainer}
-                    onChange={setTransferTrainer}
-                    options={trainers.filter((t) => t.id !== e.trainer).map((t) => ({ value: t.id, label: t.name }))}
-                  />
-                </div>
-                <div className="space-x-3">
-                  <button
-                    disabled={!transferTrainer || transferring}
-                    onClick={() => handleTransfer(e.id)}
-                    className="font-medium text-success hover:underline disabled:opacity-60 text-xs focus-ring"
-                  >
-                    {transferring ? 'Transferring…' : 'Confirm'}
-                  </button>
-                  <button onClick={closeTransfer} className="font-medium text-text-secondary hover:underline text-xs focus-ring">
-                    Cancel
-                  </button>
-                </div>
-                {transferError && <p className="text-error text-xs">{transferError}</p>}
-              </div>
-            )}
-
             <div className="flex items-center gap-3">
               <button onClick={() => toggleHistory(e.id)} className="text-xs font-medium text-primary hover:underline focus-ring">
                 {expanded === e.id ? 'Hide class history' : 'View class history'}
               </button>
-              {allowTransfer && e.status === 'ongoing' && transferId !== e.id && (
+              {allowTransfer && e.status === 'ongoing' && (
                 <button onClick={() => openTransfer(e.id)} className="text-xs font-medium text-primary hover:underline focus-ring">
                   Transfer
                 </button>
@@ -605,22 +618,22 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                     {e.payment_plan.refund_note && ` — ${e.payment_plan.refund_note}`}
                   </p>
                 )}
-                <table className="w-full text-xs">
-                  <thead className="text-text-secondary text-left">
+                <table className="table-compact">
+                  <thead>
                     <tr>
-                      <th className="py-1 pr-4">Due</th>
-                      <th className="py-1 pr-4">Amount</th>
-                      <th className="py-1"></th>
+                      <th className="table-compact-head-cell">Due</th>
+                      <th className="table-compact-head-cell">Amount</th>
+                      <th className="table-compact-head-cell"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {e.payment_plan.installments.map((inst) => (
-                      <tr key={inst.id} className="border-t border-gray-50">
-                        <td className="py-1 pr-4">
+                      <tr key={inst.id} className="table-compact-row">
+                        <td className="table-compact-cell">
                           {inst.due_at_classes === null ? 'Before class 1' : `Before class ${inst.due_at_classes}`}
                         </td>
-                        <td className="py-1 pr-4 tabular-nums">₹{inst.amount}</td>
-                        <td className="py-1 text-right whitespace-nowrap">
+                        <td className="table-compact-cell tabular-nums">₹{inst.amount}</td>
+                        <td className="table-compact-cell whitespace-nowrap">
                           {inst.paid_status === 'cancelled' ? (
                             <span className="text-text-tertiary">Cancelled</span>
                           ) : inst.paid_status === 'paid' ? (

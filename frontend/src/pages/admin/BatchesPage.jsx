@@ -148,26 +148,26 @@ export default function BatchesPage() {
           the normal way doesn't record how they heard about the center.
         </p>
         {sourceBreakdown ? (
-          <table className="w-full text-sm">
-            <thead className="text-text-secondary text-left">
+          <table className="table-compact">
+            <thead>
               <tr>
-                <th className="py-1.5 pr-4">Source</th>
-                <th className="py-1.5 pr-4">Enrolled</th>
-                <th className="py-1.5 pr-4">Collected</th>
-                <th className="py-1.5">Pending</th>
+                <th className="table-compact-head-cell">Source</th>
+                <th className="table-compact-head-cell">Enrolled</th>
+                <th className="table-compact-head-cell">Collected</th>
+                <th className="table-compact-head-cell">Pending</th>
               </tr>
             </thead>
             <tbody>
               {sourceBreakdown.map((row) => (
-                <tr key={row.source} className="border-t border-gray-100">
-                  <td className="py-1.5 pr-4">{row.source}</td>
-                  <td className="py-1.5 pr-4 tabular-nums">{row.enrolled_count}</td>
-                  <td className="py-1.5 pr-4 text-success tabular-nums">₹{row.collected}</td>
-                  <td className="py-1.5 text-warning tabular-nums">₹{row.pending}</td>
+                <tr key={row.source} className="table-compact-row">
+                  <td className="table-compact-cell">{row.source}</td>
+                  <td className="table-compact-cell tabular-nums">{row.enrolled_count}</td>
+                  <td className="table-compact-cell text-success tabular-nums">₹{row.collected}</td>
+                  <td className="table-compact-cell text-warning tabular-nums">₹{row.pending}</td>
                 </tr>
               ))}
               {sourceBreakdown.length === 0 && (
-                <tr><td colSpan={4} className="py-6 text-center text-text-tertiary">No guest sign-ups yet.</td></tr>
+                <tr><td colSpan={4} className="table-compact-cell text-text-tertiary">No guest sign-ups yet.</td></tr>
               )}
             </tbody>
           </table>

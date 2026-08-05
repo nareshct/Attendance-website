@@ -159,15 +159,33 @@ body {
     @apply w-full text-sm;
   }
   .table-head-row {
-    @apply bg-surface-sunken text-left;
+    @apply bg-surface-sunken;
   }
   .table-head-cell {
-    @apply px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary;
+    @apply px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-text-secondary;
   }
   .table-row {
     @apply border-t border-gray-100 transition-colors duration-150 ease-out hover:bg-surface-sunken;
   }
   .table-cell {
-    @apply px-4 py-3.5 text-gray-700;
+    @apply px-4 py-3.5 text-center text-gray-700;
+  }
+
+  /*
+   * Compact variant of the above — for small tables nested inside a card or
+   * modal (e.g. an installment breakdown), where the full-size padding/type
+   * scale would be oversized for the surrounding context.
+   */
+  .table-compact {
+    @apply w-full text-xs;
+  }
+  .table-compact-head-cell {
+    @apply px-3 py-1.5 text-center font-medium text-text-secondary;
+  }
+  .table-compact-row {
+    @apply border-t border-gray-100;
+  }
+  .table-compact-cell {
+    @apply px-3 py-1.5 text-center;
   }
 }

@@ -3,10 +3,8 @@ import { useParams } from 'react-router-dom'
 import { downloadFile, getParentView } from '../api/client'
 import { Badge } from '../components/Badge'
 import { Card } from '../components/Card'
-import { formatDate } from '../utils/date'
+import { formatDate, formatWeekday } from '../utils/date'
 import { formatDays, formatTime } from '../utils/schedule'
-
-const RECENT_CLASSES_PREVIEW_COUNT = 10
 
 export default function ParentSharePage() {
   const { token } = useParams()
@@ -107,22 +105,22 @@ export default function ParentSharePage() {
                     Refunded ₹{e.payment_plan.refunded_amount}
                   </p>
                 )}
-                <table className="w-full text-xs">
-                  <thead className="text-text-secondary text-left">
+                <table className="table-compact">
+                  <thead>
                     <tr>
-                      <th className="py-1 pr-4">Due</th>
-                      <th className="py-1 pr-4">Amount</th>
-                      <th className="py-1"></th>
+                      <th className="table-compact-head-cell">Due</th>
+                      <th className="table-compact-head-cell">Amount</th>
+                      <th className="table-compact-head-cell"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {e.payment_plan.installments.map((inst) => (
-                      <tr key={inst.id} className="border-t border-gray-50">
-                        <td className="py-1 pr-4">
+                      <tr key={inst.id} className="table-compact-row">
+                        <td className="table-compact-cell">
                           {inst.due_at_classes === null ? 'Before class 1' : `Before class ${inst.due_at_classes}`}
                         </td>
-                        <td className="py-1 pr-4 tabular-nums">₹{inst.amount}</td>
-                        <td className="py-1 text-right">
+                        <td className="table-compact-cell tabular-nums">₹{inst.amount}</td>
+                        <td className="table-compact-cell">
                           {inst.paid_status === 'paid' ? (
                             <span className="text-success">
                               Paid{inst.paid_date ? ` on ${formatDate(inst.paid_date)}` : ''}
@@ -140,31 +138,57 @@ export default function ParentSharePage() {
               </div>
             )}
 
-            {e.recent_classes.length > 0 && (() => {
-              const expanded = expandedEnrollmentIds.has(e.id)
-              const hasMore = e.recent_classes.length > RECENT_CLASSES_PREVIEW_COUNT
-              const visibleClasses = expanded ? e.recent_classes : e.recent_classes.slice(0, RECENT_CLASSES_PREVIEW_COUNT)
-              return (
-                <div className="border-t border-gray-100 pt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-medium text-navy">Recent classes</p>
-                    {hasMore && (
-                      <button
-                        onClick={() => toggleClassesExpanded(e.id)}
-                        className="text-xs font-medium text-primary hover:underline focus-ring"
-                      >
-                        {expanded ? 'Show recent only ▲' : `View all ${e.recent_classes.length} classes ▼`}
-                      </button>
-                    )}
+            {e.recent_classes.length > 0 && (
+              <div className="border-t border-gray-100 pt-3">
+                <button
+                  onClick={() => toggleClassesExpanded(e.id)}
+                  className="text-xs font-medium text-primary hover:underline focus-ring"
+                >
+                  {expandedEnrollmentIds.has(e.id) ? 'Hide class history' : 'View class history'}
+                </button>
+
+                {expandedEnrollmentIds.has(e.id) && (
+                  <div className="mt-3">
+                    <p className="text-xs text-text-secondary mb-2">
+                      {e.recent_classes.length} class{e.recent_classes.length === 1 ? '' : 'es'} recorded
+                    </p>
+                    <div className="rounded-lg border border-gray-100 overflow-hidden">
+                      <table className="table">
+                        <thead>
+                          <tr className="table-head-row">
+                            <th className="table-head-cell w-12">#</th>
+                            <th className="table-head-cell">Date</th>
+                            <th className="table-head-cell">Topic covered</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {e.recent_classes.map((c, idx) => {
+                            const num = e.recent_classes.length - idx
+                            return (
+                              <tr key={idx} className="table-row">
+                                <td className="table-cell">
+                                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary-tint text-primary text-[11px] font-semibold tabular-nums">
+                                    {num}
+                                  </span>
+                                </td>
+                                <td className="table-cell whitespace-nowrap">
+                                  <div className="font-medium text-navy">{formatDate(c.date)}</div>
+                                  <div className="text-xs text-text-tertiary">
+                                    {formatWeekday(c.date)}
+                                    {idx === 0 && <span className="ml-1.5 text-primary">· Most recent</span>}
+                                  </div>
+                                </td>
+                                <td className="table-cell text-text-secondary">{c.topic_covered || '—'}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <ul className="text-xs text-text-secondary space-y-1">
-                    {visibleClasses.map((c, j) => (
-                      <li key={j}>{formatDate(c.date)} — {c.topic_covered || '—'}</li>
-                    ))}
-                  </ul>
-                </div>
-              )
-            })()}
+                )}
+              </div>
+            )}
           </Card>
         ))}
         {profile.enrollments.length === 0 && (

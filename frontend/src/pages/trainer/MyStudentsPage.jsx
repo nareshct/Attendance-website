@@ -50,29 +50,29 @@ export default function MyStudentsPage() {
       </div>
 
       <Card className="p-0 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 text-left">
+        <table className="table">
+          <thead className="table-head-row">
             <tr>
-              <th className="px-4 py-3">Student</th>
-              <th className="px-4 py-3">Course</th>
-              <th className="px-4 py-3">Batch</th>
-              <th className="px-4 py-3">Progress</th>
-              <th className="px-4 py-3">Status</th>
+              <th className="table-head-cell">Student</th>
+              <th className="table-head-cell">Course</th>
+              <th className="table-head-cell">Batch</th>
+              <th className="table-head-cell">Progress</th>
+              <th className="table-head-cell">Status</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((e) => (
-              <tr key={e.id} className="border-t border-gray-100">
-                <td className="px-4 py-3">
-                  <Link to={`/trainer/students/${e.student}`} className="text-brand-blue hover:underline">{e.student_name}</Link>
+              <tr key={e.id} className="table-row">
+                <td className="table-cell">
+                  <Link to={`/trainer/students/${e.student}`} className="text-brand-blue hover:underline focus-ring">{e.student_name}</Link>
                   {e.covering_for && (
                     <span className="block text-xs text-brand-violet mt-1">Covering for {e.covering_for}</span>
                   )}
                 </td>
-                <td className="px-4 py-3">{e.course_name}</td>
-                <td className="px-4 py-3">{e.batch_number}</td>
-                <td className="px-4 py-3">{e.classes_completed}/{e.classes_total}</td>
-                <td className="px-4 py-3">
+                <td className="table-cell">{e.course_name}</td>
+                <td className="table-cell">{e.batch_number}</td>
+                <td className="table-cell">{e.classes_completed}/{e.classes_total}</td>
+                <td className="table-cell">
                   <Badge status={e.status} />
                   {e.payment_blocked && (
                     <span className="block text-xs text-brand-amber mt-1">Payment pending — schedule paused</span>
@@ -81,7 +81,7 @@ export default function MyStudentsPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">
+              <tr><td colSpan={5} className="table-cell text-center text-gray-400">
                 {enrollments.length === 0
                   ? 'No students allocated to you yet.'
                   : search
