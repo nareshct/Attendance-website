@@ -6,6 +6,13 @@ const FOCUSABLE_SELECTOR =
 export function Modal({ open, onClose, title, children, maxWidthClass = 'max-w-lg' }) {
   const panelRef = useRef(null)
   const previouslyFocusedRef = useRef(null)
+  // Callers pass an inline onClose, a fresh function identity on every parent
+  // render (e.g. every keystroke in a controlled form field). Reading it via
+  // ref keeps the effect below from depending on that identity — otherwise it
+  // tears down and re-runs on every keystroke, re-grabbing focus onto the
+  // first focusable element (the ✕ button) and yanking it out of the input.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
   useEffect(() => {
     if (!open) return
@@ -23,7 +30,7 @@ export function Modal({ open, onClose, title, children, maxWidthClass = 'max-w-l
 
     function handleKey(e) {
       if (e.key === 'Escape') {
-        onClose()
+        onCloseRef.current()
         return
       }
       if (e.key !== 'Tab') return
@@ -54,7 +61,7 @@ export function Modal({ open, onClose, title, children, maxWidthClass = 'max-w-l
       document.body.style.overflow = prevOverflow
       previouslyFocusedRef.current?.focus?.()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 
