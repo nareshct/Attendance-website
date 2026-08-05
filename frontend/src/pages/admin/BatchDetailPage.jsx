@@ -59,6 +59,14 @@ export default function BatchDetailPage() {
   const [addSessionError, setAddSessionError] = useState('')
   const [addingSession, setAddingSession] = useState(false)
 
+  const [editSessionTarget, setEditSessionTarget] = useState(null)
+  const [editSessionForm, setEditSessionForm] = useState({ date: '', conducted_by_name: '', topic_covered: '', recording_link: '' })
+  const [editSessionError, setEditSessionError] = useState('')
+  const [savingSessionEdit, setSavingSessionEdit] = useState(false)
+
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState(null)
+  const [deletingSession, setDeletingSession] = useState(false)
+
   const [showImport, setShowImport] = useState(false)
   const [importFile, setImportFile] = useState(null)
   const [importResult, setImportResult] = useState(null)
@@ -438,6 +446,45 @@ export default function BatchDetailPage() {
     }
   }
 
+  function openEditSession(session) {
+    setEditSessionTarget(session)
+    setEditSessionForm({
+      date: session.date,
+      conducted_by_name: session.conducted_by_name,
+      topic_covered: session.topic_covered || '',
+      recording_link: session.recording_link || '',
+    })
+    setEditSessionError('')
+  }
+
+  async function handleSaveSessionEdit(e) {
+    e.preventDefault()
+    setSavingSessionEdit(true)
+    setEditSessionError('')
+    try {
+      await api(`/api/batch-sessions/${editSessionTarget.id}/`, { method: 'PATCH', body: editSessionForm })
+      setEditSessionTarget(null)
+      await loadSessions()
+    } catch (err) {
+      setEditSessionError(err.message)
+    } finally {
+      setSavingSessionEdit(false)
+    }
+  }
+
+  async function handleDeleteSession() {
+    setDeletingSession(true)
+    try {
+      await api(`/api/batch-sessions/${deleteSessionTarget.id}/`, { method: 'DELETE' })
+      setDeleteSessionTarget(null)
+      await loadSessions()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeletingSession(false)
+    }
+  }
+
   function closeImport() {
     setShowImport(false)
     setImportFile(null)
@@ -773,6 +820,87 @@ export default function BatchDetailPage() {
           </div>
         </form>
       </Modal>
+
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-semibold text-navy">Sessions</h2>
+        <Button onClick={() => setShowAddSession(true)}>+ Log session</Button>
+      </div>
+
+      <Modal open={showAddSession} onClose={() => setShowAddSession(false)} title="Log a session">
+        <form onSubmit={handleAddSession} className="space-y-3">
+          <input required type="date" value={sessionForm.date} onChange={(e) => setSessionForm({ ...sessionForm, date: e.target.value })} className="input" />
+          <input required placeholder="Conducted by (name)" value={sessionForm.conducted_by_name} onChange={(e) => setSessionForm({ ...sessionForm, conducted_by_name: e.target.value })} className="input" />
+          <input placeholder="Topic covered (optional)" value={sessionForm.topic_covered} onChange={(e) => setSessionForm({ ...sessionForm, topic_covered: e.target.value })} className="input" />
+          <input placeholder="Recording link (Google Drive, optional)" value={sessionForm.recording_link} onChange={(e) => setSessionForm({ ...sessionForm, recording_link: e.target.value })} className="input" />
+          {addSessionError && <p className="text-error text-xs">{addSessionError}</p>}
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="ghost" onClick={() => setShowAddSession(false)}>
+              Cancel
+            </Button>
+            <Button disabled={addingSession} type="submit" variant="success">
+              {addingSession ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={Boolean(editSessionTarget)} onClose={() => setEditSessionTarget(null)} title="Edit session">
+        <form onSubmit={handleSaveSessionEdit} className="space-y-3">
+          <input required type="date" value={editSessionForm.date} onChange={(e) => setEditSessionForm({ ...editSessionForm, date: e.target.value })} className="input" />
+          <input required placeholder="Conducted by (name)" value={editSessionForm.conducted_by_name} onChange={(e) => setEditSessionForm({ ...editSessionForm, conducted_by_name: e.target.value })} className="input" />
+          <input placeholder="Topic covered (optional)" value={editSessionForm.topic_covered} onChange={(e) => setEditSessionForm({ ...editSessionForm, topic_covered: e.target.value })} className="input" />
+          <input placeholder="Recording link (Google Drive, optional)" value={editSessionForm.recording_link} onChange={(e) => setEditSessionForm({ ...editSessionForm, recording_link: e.target.value })} className="input" />
+          {editSessionError && <p className="text-error text-xs">{editSessionError}</p>}
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="ghost" onClick={() => setEditSessionTarget(null)}>
+              Cancel
+            </Button>
+            <Button disabled={savingSessionEdit} type="submit" variant="success">
+              {savingSessionEdit ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Card className="p-0 overflow-x-auto">
+        <table className="table">
+          <thead className="table-head-row">
+            <tr>
+              <th className="table-head-cell">Date</th>
+              <th className="table-head-cell">Conducted by</th>
+              <th className="table-head-cell">Topic</th>
+              <th className="table-head-cell">Recording</th>
+              <th className="table-head-cell"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sessions.map((s) => (
+              <tr key={s.id} className="table-row">
+                <td className="table-cell">{formatDate(s.date)}</td>
+                <td className="table-cell">{s.conducted_by_name}</td>
+                <td className="table-cell text-text-secondary">{s.topic_covered || '—'}</td>
+                <td className="table-cell">
+                  {s.recording_link ? (
+                    <a href={s.recording_link} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline focus-ring">Open</a>
+                  ) : '—'}
+                </td>
+                <td className="table-cell text-right whitespace-nowrap">
+                  <button onClick={() => openEditSession(s)} className="text-xs font-medium text-primary hover:underline focus-ring">
+                    Edit
+                  </button>
+                  {' · '}
+                  <button onClick={() => setDeleteSessionTarget(s)} className="text-xs font-medium text-error hover:underline focus-ring">
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {sessions.length === 0 && (
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">No sessions logged yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </Card>
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-navy">Enrolled students</h2>
@@ -1191,58 +1319,17 @@ export default function BatchDetailPage() {
         )}
       </Modal>
 
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold text-navy">Sessions</h2>
-        <Button onClick={() => setShowAddSession(true)}>+ Log session</Button>
-      </div>
-
-      <Modal open={showAddSession} onClose={() => setShowAddSession(false)} title="Log a session">
-        <form onSubmit={handleAddSession} className="space-y-3">
-          <input required type="date" value={sessionForm.date} onChange={(e) => setSessionForm({ ...sessionForm, date: e.target.value })} className="input" />
-          <input required placeholder="Conducted by (name)" value={sessionForm.conducted_by_name} onChange={(e) => setSessionForm({ ...sessionForm, conducted_by_name: e.target.value })} className="input" />
-          <input placeholder="Topic covered (optional)" value={sessionForm.topic_covered} onChange={(e) => setSessionForm({ ...sessionForm, topic_covered: e.target.value })} className="input" />
-          <input placeholder="Recording link (Google Drive, optional)" value={sessionForm.recording_link} onChange={(e) => setSessionForm({ ...sessionForm, recording_link: e.target.value })} className="input" />
-          {addSessionError && <p className="text-error text-xs">{addSessionError}</p>}
-          <div className="flex justify-end gap-3">
-            <Button type="button" variant="ghost" onClick={() => setShowAddSession(false)}>
-              Cancel
-            </Button>
-            <Button disabled={addingSession} type="submit" variant="success">
-              {addingSession ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      <Card className="p-0 overflow-x-auto">
-        <table className="table">
-          <thead className="table-head-row">
-            <tr>
-              <th className="table-head-cell">Date</th>
-              <th className="table-head-cell">Conducted by</th>
-              <th className="table-head-cell">Topic</th>
-              <th className="table-head-cell">Recording</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sessions.map((s) => (
-              <tr key={s.id} className="table-row">
-                <td className="table-cell">{formatDate(s.date)}</td>
-                <td className="table-cell">{s.conducted_by_name}</td>
-                <td className="table-cell text-text-secondary">{s.topic_covered || '—'}</td>
-                <td className="table-cell">
-                  {s.recording_link ? (
-                    <a href={s.recording_link} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline focus-ring">Open</a>
-                  ) : '—'}
-                </td>
-              </tr>
-            ))}
-            {sessions.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">No sessions logged yet.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
+      <ConfirmDialog
+        open={Boolean(deleteSessionTarget)}
+        onClose={() => setDeleteSessionTarget(null)}
+        onConfirm={handleDeleteSession}
+        title="Delete session"
+        message={`Delete the session logged for ${formatDate(deleteSessionTarget?.date)}? This cannot be undone.`}
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        danger
+        busy={deletingSession}
+      />
 
       <ConfirmDialog
         open={confirmDeleteBatchOpen}

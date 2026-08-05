@@ -374,3 +374,11 @@ class BatchSessionViewSet(ModelViewSet):
                     {'detail': "You're not listed as a trainer on this batch."}, status=status.HTTP_403_FORBIDDEN,
                 )
         return super().create(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        session = serializer.save()
+        log_action(self.request.user, 'batch_session_edit', f'{session.batch.name} — {session.date}', '')
+
+    def perform_destroy(self, instance):
+        log_action(self.request.user, 'batch_session_delete', f'{instance.batch.name} — {instance.date}', '')
+        instance.delete()
