@@ -223,6 +223,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'login': '5/min',
         'password_reset': '3/min',
+        'parent_link': '30/min',
     },
 }
 

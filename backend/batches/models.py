@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models
 
 from courses.models import Course
@@ -166,6 +167,15 @@ class BatchSession(models.Model):
     topic_covered = models.TextField(blank=True, default='')
     recording_link = models.URLField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
+    # Who actually submitted this log entry via the API — distinct from
+    # conducted_by_name, which is free text describing who *ran* the class (may name
+    # someone else, e.g. a substitute). Used only to scope edit/delete to the trainer
+    # who logged it (see BatchSessionViewSet); null for rows created before this field
+    # existed, or if the submitting user is later deleted — those stay editable by any
+    # co-trainer on the batch rather than becoming permanently locked.
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
 
     class Meta:
         ordering = ['-date']

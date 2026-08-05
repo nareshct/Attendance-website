@@ -6,7 +6,7 @@ from django.http import HttpResponse
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.generics import ListAPIView
-from rest_framework.exceptions import MethodNotAllowed
+from rest_framework.exceptions import MethodNotAllowed, PermissionDenied
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
@@ -375,10 +375,25 @@ class BatchSessionViewSet(ModelViewSet):
                 )
         return super().create(request, *args, **kwargs)
 
+    def _check_editable_by(self, instance):
+        # Any co-trainer on the batch can still edit a session logged before
+        # created_by existed (null) — only newly-created rows are locked to their
+        # own submitter, so this doesn't retroactively strand old data.
+        user = self.request.user
+        if user.is_staff or instance.created_by_id is None:
+            return
+        if instance.created_by_id != user.id:
+            raise PermissionDenied('You can only edit or delete a session you logged yourself.')
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
     def perform_update(self, serializer):
+        self._check_editable_by(serializer.instance)
         session = serializer.save()
         log_action(self.request.user, 'batch_session_edit', f'{session.batch.name} — {session.date}', '')
 
     def perform_destroy(self, instance):
+        self._check_editable_by(instance)
         log_action(self.request.user, 'batch_session_delete', f'{instance.batch.name} — {instance.date}', '')
         instance.delete()

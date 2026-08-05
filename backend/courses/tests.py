@@ -45,6 +45,21 @@ class CourseTrainerAccessTests(APITestCase):
         response = CourseViewSet.as_view({'get': 'list'})(request)
         self.assertEqual(response.status_code, 200)
 
+    def test_trainer_does_not_see_rate_per_class(self):
+        # rate_per_class is the B2C price list — billing data a trainer has no reason
+        # to see, even though they need list access for the Course Materials filter.
+        request = self.factory.get('/api/courses/')
+        force_authenticate(request, user=self.trainer.user)
+        response = CourseViewSet.as_view({'get': 'list'})(request)
+        self.assertNotIn('rate_per_class', response.data['results'][0])
+
+    def test_admin_still_sees_rate_per_class(self):
+        admin = get_user_model().objects.create_user(username='course_admin', password='x', is_staff=True)
+        request = self.factory.get('/api/courses/')
+        force_authenticate(request, user=admin)
+        response = CourseViewSet.as_view({'get': 'list'})(request)
+        self.assertIn('rate_per_class', response.data['results'][0])
+
     def test_trainer_cannot_create_a_course(self):
         request = self.factory.post('/api/courses/', {'name': 'New', 'total_classes': 24, 'rate_per_class': '500'})
         force_authenticate(request, user=self.trainer.user)

@@ -6,7 +6,7 @@ from rest_framework.viewsets import ModelViewSet
 from config.permissions import IsAdmin, IsAdminOrTrainer
 
 from .models import Course, CourseMaterial
-from .serializers import CourseMaterialSerializer, CourseSerializer
+from .serializers import CourseMaterialSerializer, CourseSerializer, TrainerCourseSerializer
 
 
 class CourseViewSet(ModelViewSet):
@@ -22,6 +22,14 @@ class CourseViewSet(ModelViewSet):
         if self.action in ('list', 'retrieve'):
             return [IsAdminOrTrainer()]
         return [IsAdmin()]
+
+    def get_serializer_class(self):
+        # rate_per_class is the B2C price list — billing data a trainer has no reason
+        # to see, even though they need list/retrieve access for the Course Materials
+        # filter. See TrainerCourseSerializer.
+        if self.action in ('list', 'retrieve') and not self.request.user.is_staff:
+            return TrainerCourseSerializer
+        return CourseSerializer
 
 
 class CourseMaterialViewSet(ModelViewSet):

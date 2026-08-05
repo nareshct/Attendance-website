@@ -16,3 +16,14 @@ class PasswordResetRateThrottle(AnonRateThrottle):
     used to spam a mailbox with reset emails or hammer the confirm step."""
 
     scope = 'password_reset'
+
+
+class ParentLinkRateThrottle(AnonRateThrottle):
+    """Limits requests per client IP to the public, unauthenticated parent
+    share-link endpoints (ParentShareView/ParentCertificateView). The token
+    itself is a UUID4 — brute-forcing it isn't practical — but these are the
+    only endpoints in the app with no login at all, so a per-IP cap still
+    guards against scraping/DoS since nothing else stands between a request
+    and the database."""
+
+    scope = 'parent_link'

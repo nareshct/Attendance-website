@@ -9,6 +9,16 @@ class CourseSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'total_classes', 'rate_per_class']
 
 
+class TrainerCourseSerializer(serializers.ModelSerializer):
+    """Course list/detail as seen by a trainer — everything except rate_per_class
+    (the B2C price list), which is billing data a trainer has no reason to see.
+    Trainers only hit this endpoint to filter Course Materials by course."""
+
+    class Meta:
+        model = Course
+        fields = ['id', 'name', 'total_classes']
+
+
 class CourseMaterialSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)
     file_name = serializers.SerializerMethodField()

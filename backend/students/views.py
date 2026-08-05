@@ -13,6 +13,7 @@ from rest_framework.viewsets import ModelViewSet
 
 from audit.services import log_action
 from config.permissions import IsAdmin, IsAdminOrTrainer
+from config.throttling import ParentLinkRateThrottle
 from enrollments.certificate_pdf import render_certificate_pdf
 from enrollments.models import Enrollment, SubstituteAssignment
 from enrollments.serializers import PaymentPlanSerializer
@@ -202,6 +203,7 @@ class ParentShareView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [ParentLinkRateThrottle]
 
     def get(self, request, token):
         link = ParentShareLink.objects.filter(token=token, revoked=False).select_related('student').first()
@@ -255,6 +257,7 @@ class ParentCertificateView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [ParentLinkRateThrottle]
 
     def get(self, request, token, enrollment_id):
         link = ParentShareLink.objects.filter(token=token, revoked=False).select_related('student').first()

@@ -14,8 +14,19 @@ export class ApiError extends Error {
 // one page, so this is a no-op today. Pass `raw: true` to get the full envelope back
 // (count/next/previous) instead — used by pages with their own "Load more" control, see
 // usePaginatedList().
+//
+// If a list ever does grow past one page, silently returning just page 1 here would
+// make every count/total on that page quietly wrong with no error — worse than a
+// crash. Fail loudly instead, so it gets caught and either paginated properly or
+// switched to `raw: true` + usePaginatedList().
 function unwrapPaginated(data) {
   if (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray(data.results) && 'count' in data) {
+    if (data.next) {
+      throw new ApiError(
+        'This list has more results than the app fetched (it only reads the first page) — numbers on this page would be incomplete.',
+        599,
+      )
+    }
     return data.results
   }
   return data

@@ -806,6 +806,71 @@ class TrainerSelfServiceTests(APITestCase):
         response = BatchSessionViewSet.as_view({'post': 'create'})(request)
         self.assertEqual(response.status_code, 403)
 
+    def test_co_trainer_cannot_edit_a_session_they_did_not_log(self):
+        # self.my_batch is co-taught by Priya (self.trainer) and Ravi (self.other_trainer).
+        session = BatchSession.objects.create(
+            batch=self.my_batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya', created_by=self.trainer.user,
+        )
+        request = self.factory.patch(
+            f'/api/batch-sessions/{session.id}/', {'topic_covered': 'hijacked'}, format='json',
+        )
+        force_authenticate(request, user=self.other_trainer.user)
+        response = BatchSessionViewSet.as_view({'patch': 'partial_update'})(request, pk=session.id)
+        self.assertEqual(response.status_code, 403)
+
+    def test_co_trainer_cannot_delete_a_session_they_did_not_log(self):
+        session = BatchSession.objects.create(
+            batch=self.my_batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya', created_by=self.trainer.user,
+        )
+        request = self.factory.delete(f'/api/batch-sessions/{session.id}/')
+        force_authenticate(request, user=self.other_trainer.user)
+        response = BatchSessionViewSet.as_view({'delete': 'destroy'})(request, pk=session.id)
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(BatchSession.objects.filter(id=session.id).exists())
+
+    def test_trainer_can_edit_their_own_logged_session(self):
+        session = BatchSession.objects.create(
+            batch=self.my_batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya', created_by=self.trainer.user,
+        )
+        request = self.factory.patch(
+            f'/api/batch-sessions/{session.id}/', {'topic_covered': 'updated'}, format='json',
+        )
+        force_authenticate(request, user=self.trainer.user)
+        response = BatchSessionViewSet.as_view({'patch': 'partial_update'})(request, pk=session.id)
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_admin_can_edit_any_trainers_session(self):
+        session = BatchSession.objects.create(
+            batch=self.my_batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya', created_by=self.trainer.user,
+        )
+        request = self.factory.patch(
+            f'/api/batch-sessions/{session.id}/', {'topic_covered': 'admin edit'}, format='json',
+        )
+        force_authenticate(request, user=self.admin)
+        response = BatchSessionViewSet.as_view({'patch': 'partial_update'})(request, pk=session.id)
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_legacy_session_with_no_created_by_stays_editable_by_any_co_trainer(self):
+        # created_by is null for sessions logged before that field existed — those
+        # must not become permanently locked out for every co-trainer on the batch.
+        session = BatchSession.objects.create(batch=self.my_batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya')
+        request = self.factory.patch(
+            f'/api/batch-sessions/{session.id}/', {'topic_covered': 'legacy edit'}, format='json',
+        )
+        force_authenticate(request, user=self.other_trainer.user)
+        response = BatchSessionViewSet.as_view({'patch': 'partial_update'})(request, pk=session.id)
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_created_by_is_set_automatically_on_create(self):
+        request = self.factory.post('/api/batch-sessions/', {
+            'batch': self.my_batch.id, 'date': '2026-07-06', 'conducted_by_name': 'Priya',
+        }, format='json')
+        force_authenticate(request, user=self.trainer.user)
+        response = BatchSessionViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 201, response.data)
+        session = BatchSession.objects.get(id=response.data['id'])
+        self.assertEqual(session.created_by_id, self.trainer.user.id)
+
     def test_trainer_only_sees_their_own_payouts(self):
         BatchPayout.objects.create(batch=self.my_batch, recipient_name='Priya', amount=Decimal('1000'))
         BatchPayout.objects.create(batch=self.my_batch, recipient_name='Ravi', amount=Decimal('2000'))
