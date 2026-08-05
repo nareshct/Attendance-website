@@ -21,13 +21,12 @@ export default function TrainerDashboard() {
     let cancelled = false
     async function load() {
       try {
-        const [students, earnings, current, markedToday, attendanceRequests, materials] = await Promise.all([
+        const [students, earnings, current, markedToday, attendanceRequests] = await Promise.all([
           api('/api/my-students/'),
           api('/api/my-earnings/'),
           api('/api/my-earnings/current/'),
           api(`/api/attendance/?date=${today()}`),
           api('/api/attendance-requests/'),
-          api('/api/course-materials/'),
         ])
         if (cancelled) return
 
@@ -58,9 +57,6 @@ export default function TrainerDashboard() {
           })
         })
 
-        const courseIds = new Set(ongoing.map((s) => s.course))
-        const materialsForMyCourses = materials.filter((m) => courseIds.has(m.course)).length
-
         const lastCycle = earnings.find(
           (p) => p.cycle_start !== current.cycle_start || p.cycle_end !== current.cycle_end,
         )
@@ -72,7 +68,6 @@ export default function TrainerDashboard() {
           approvedRequests: attendanceRequests.filter((r) => r.status === 'approved').length,
           classesLeftThisWeek,
           batchesCompleted: students.filter((s) => s.status === 'completed').length,
-          materialsForMyCourses,
         })
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -135,13 +130,6 @@ export default function TrainerDashboard() {
           value={stats ? stats.batchesCompleted : '…'}
           accentClass="text-brand-green"
         />
-        <Link to="/trainer/course-materials" className="block hover:opacity-80 transition-opacity">
-          <StatCard
-            label="Materials for your courses"
-            value={stats ? stats.materialsForMyCourses : '…'}
-            accentClass="text-brand-blue"
-          />
-        </Link>
       </div>
 
       <h2 className="text-lg font-semibold text-navy mb-3">Weekly class schedule</h2>
