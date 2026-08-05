@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AuthProvider } from './context/AuthContext'
+import { useApi } from './hooks/useApi'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import ParentSharePage from './pages/ParentSharePage'
@@ -54,6 +56,27 @@ const TRAINER_NAV = [
   { to: '/trainer/course-materials', label: 'Course Materials' },
 ]
 
+function TrainerShell() {
+  const api = useApi()
+  const [hasBatches, setHasBatches] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    api('/api/my-batches/')
+      .then((batches) => {
+        if (!cancelled) setHasBatches(batches.length > 0)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [api])
+
+  const navItems = hasBatches ? TRAINER_NAV : TRAINER_NAV.filter((item) => item.to !== '/trainer/my-batches')
+
+  return <Layout title="Trainer" navItems={navItems} accentClass="bg-brand-violet" />
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -93,7 +116,7 @@ export default function App() {
           path="/trainer"
           element={
             <ProtectedRoute role="trainer">
-              <Layout title="Trainer" navItems={TRAINER_NAV} accentClass="bg-brand-violet" />
+              <TrainerShell />
             </ProtectedRoute>
           }
         >

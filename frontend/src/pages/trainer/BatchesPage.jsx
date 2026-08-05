@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -12,6 +13,7 @@ const EMPTY_SESSION_FORM = { date: '', topic_covered: '', recording_link: '' }
 
 export default function TrainerBatchesPage() {
   const api = useApi()
+  const navigate = useNavigate()
   const { auth } = useAuth()
   const [batches, setBatches] = useState([])
   const [sessionsByBatch, setSessionsByBatch] = useState({})
@@ -24,8 +26,16 @@ export default function TrainerBatchesPage() {
   const [logging, setLogging] = useState(false)
 
   const loadBatches = useCallback(() => {
-    return api('/api/my-batches/').then(setBatches)
-  }, [api])
+    // The nav link to this page is already hidden for a trainer on zero batches
+    // (see TrainerShell in App.jsx) — this covers reaching the URL directly.
+    return api('/api/my-batches/').then((data) => {
+      if (data.length === 0) {
+        navigate('/trainer', { replace: true })
+        return
+      }
+      setBatches(data)
+    })
+  }, [api, navigate])
 
   useEffect(() => {
     loadBatches().catch((err) => setError(err.message))
