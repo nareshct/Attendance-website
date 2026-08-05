@@ -26,14 +26,36 @@ class TrainerSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, style={'input_type': 'password'})
     course_rates = TrainerCourseRateSerializer(many=True, read_only=True)
     rates = TrainerCourseRateInputSerializer(many=True, write_only=True, required=False)
+    # Annotated on TrainerViewSet.get_queryset() — fall back to a live query for callers
+    # that build a Trainer instance outside that queryset (e.g. serializer.save() in create()).
+    active_student_count = serializers.SerializerMethodField()
+    payout_pending = serializers.SerializerMethodField()
 
     class Meta:
         model = Trainer
         fields = [
             'id', 'trainer_id', 'name', 'phone_number', 'place', 'status', 'default_rate_per_class',
-            'username', 'password', 'course_rates', 'rates',
+            'username', 'password', 'course_rates', 'rates', 'active_student_count', 'payout_pending',
         ]
         read_only_fields = ['trainer_id', 'status']
+
+    def get_active_student_count(self, obj):
+        if isinstance(getattr(obj, 'active_student_count', None), int):
+            return obj.active_student_count
+        return obj.enrollments.filter(status='ongoing').count()
+
+    def get_payout_pending(self, obj):
+        """Unpaid closed-cycle payouts only — deliberately excludes the live, still-open
+        current cycle, since that amount isn't due yet (a cycle has to close before it
+        becomes an actual Payout an admin can mark paid)."""
+        from decimal import Decimal
+
+        from django.db.models import Sum
+
+        pending_closed = getattr(obj, 'pending_payout_amount', None)
+        if pending_closed is None:
+            pending_closed = obj.payouts.filter(paid_status='pending').aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
+        return pending_closed
 
     def create(self, validated_data):
         username = validated_data.pop('username', None)

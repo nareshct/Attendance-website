@@ -24,13 +24,17 @@ class ClientSerializer(serializers.ModelSerializer):
     course_rates = ClientCourseRateSerializer(many=True, read_only=True)
     contacts = ClientContactSerializer(many=True, read_only=True)
     pending_amount = serializers.SerializerMethodField()
-    has_overdue_invoice = serializers.SerializerMethodField()
+    # Annotated on ClientViewSet.get_queryset() — fall back to a live count for callers
+    # that build a Client instance outside that queryset (e.g. serializer.save() in create()).
+    active_student_count = serializers.SerializerMethodField()
+    overdue_invoice_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Client
         fields = [
             'id', 'company_name', 'contact_phone', 'contact_email', 'rate_per_class',
-            'status', 'course_rates', 'contacts', 'pending_amount', 'has_overdue_invoice',
+            'status', 'course_rates', 'contacts', 'pending_amount',
+            'active_student_count', 'overdue_invoice_count',
         ]
         read_only_fields = ['status']
 
@@ -56,8 +60,15 @@ class ClientSerializer(serializers.ModelSerializer):
         current = client_current_cycle_totals(obj, cycle=self.context['current_cycle'])
         return current['total_revenue'] + closed_pending
 
-    def get_has_overdue_invoice(self, obj):
+    def get_active_student_count(self, obj):
+        if isinstance(getattr(obj, 'active_student_count', None), int):
+            return obj.active_student_count
+        return obj.students.filter(status='active').count()
+
+    def get_overdue_invoice_count(self, obj):
         from billing.models import ClientInvoice
 
+        if isinstance(getattr(obj, 'overdue_invoice_count', None), int):
+            return obj.overdue_invoice_count
         cutoff = date.today() - timedelta(days=ClientInvoice.OVERDUE_GRACE_DAYS)
-        return obj.invoices.filter(status='pending', cycle__cycle_end__lt=cutoff).exists()
+        return obj.invoices.filter(status='pending', cycle__cycle_end__lt=cutoff).count()

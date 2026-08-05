@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card, StatCard } from '../../components/Card'
 import { Modal } from '../../components/Modal'
@@ -122,7 +121,9 @@ export default function ClientsPage() {
             <tr>
               <th className="table-head-cell">Company</th>
               <th className="table-head-cell">Phone</th>
-              <th className="table-head-cell">Pending amount</th>
+              <th className="table-head-cell">Active students</th>
+              <th className="table-head-cell">Payin pending</th>
+              <th className="table-head-cell">Overdue invoices</th>
               <th className="table-head-cell"></th>
             </tr>
           </thead>
@@ -133,11 +134,14 @@ export default function ClientsPage() {
                   <Link to={`/admin/clients/${c.id}`} className="font-medium text-primary hover:underline focus-ring">{c.company_name}</Link>
                 </td>
                 <td className="table-cell">{c.contact_phone}</td>
-                <td className="table-cell">
-                  <div className="flex items-center gap-2">
-                    <span className="tabular-nums">₹{c.pending_amount}</span>
-                    {c.has_overdue_invoice && <Badge status="overdue" />}
-                  </div>
+                <td className="table-cell tabular-nums">{c.active_student_count}</td>
+                <td className="table-cell tabular-nums text-warning font-medium">₹{c.pending_amount}</td>
+                <td className="table-cell tabular-nums">
+                  {c.overdue_invoice_count > 0 ? (
+                    <span className="text-error font-medium">{c.overdue_invoice_count}</span>
+                  ) : (
+                    c.overdue_invoice_count
+                  )}
                 </td>
                 <td className="table-cell text-right">
                   {c.status === 'active' ? (
@@ -153,7 +157,7 @@ export default function ClientsPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">No clients found.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">No clients found.</td></tr>
             )}
           </tbody>
         </table>

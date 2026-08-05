@@ -1,6 +1,7 @@
+from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import Q, Sum
+from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -9,6 +10,7 @@ from rest_framework.viewsets import ModelViewSet
 from billing.models import BillingCycle, ClientInvoice
 from billing.services import client_all_time_totals, client_current_cycle_totals, get_or_create_cycle
 from config.permissions import IsAdmin
+from students.models import Student
 
 from .models import Client, ClientContact, ClientCourseRate
 from .serializers import ClientContactSerializer, ClientCourseRateSerializer, ClientSerializer
@@ -16,17 +18,36 @@ from .services import client_totals
 
 
 class ClientViewSet(ModelViewSet):
-    queryset = Client.objects.annotate(
-        pending_amount=Coalesce(
-            Sum('invoices__total_amount', filter=Q(invoices__status='pending', invoices__cycle__status='closed')),
-            Decimal('0.00'),
-        )
-    ).order_by('company_name')
     serializer_class = ClientSerializer
     permission_classes = [IsAdmin]
     # No DELETE — clients are only ever archived (see archive/unarchive below), never
     # hard-deleted, so their students'/invoices' history can never be lost.
     http_method_names = ['get', 'post', 'put', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        # active_student_count/overdue_invoice_count are Subquery annotations rather than
+        # folded into the same .annotate() as pending_amount's invoices Sum — aggregating
+        # over two different reverse relations (students vs invoices) in one annotate()
+        # call multiplies rows before aggregating (Django's multi-relation fan-out), which
+        # would silently inflate pending_amount. A Subquery is independent of the outer
+        # join and of each other, so this sidesteps that entirely.
+        cutoff = date.today() - timedelta(days=ClientInvoice.OVERDUE_GRACE_DAYS)
+        active_students = (
+            Student.objects.filter(client=OuterRef('pk'), status='active')
+            .order_by().values('client').annotate(c=Count('id')).values('c')
+        )
+        overdue_invoices = (
+            ClientInvoice.objects.filter(client=OuterRef('pk'), status='pending', cycle__cycle_end__lt=cutoff)
+            .order_by().values('client').annotate(c=Count('id')).values('c')
+        )
+        return Client.objects.annotate(
+            pending_amount=Coalesce(
+                Sum('invoices__total_amount', filter=Q(invoices__status='pending', invoices__cycle__status='closed')),
+                Decimal('0.00'),
+            ),
+            active_student_count=Coalesce(Subquery(active_students), 0),
+            overdue_invoice_count=Coalesce(Subquery(overdue_invoices), 0),
+        ).order_by('company_name')
 
     @action(detail=False, methods=['get'])
     def summary(self, request):

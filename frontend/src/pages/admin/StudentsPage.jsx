@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
@@ -60,9 +59,21 @@ export default function StudentsPage() {
 
   const studentTrainerIds = {}
   const studentCourseIds = {}
+  const studentPrimaryEnrollment = {}
   for (const e of enrollments) {
     ;(studentTrainerIds[e.student] ??= new Set()).add(e.trainer)
     ;(studentCourseIds[e.student] ??= new Set()).add(e.course)
+
+    // One row per student — prefer their ongoing enrollment; among enrollments with the
+    // same status, the most recently started one wins.
+    const current = studentPrimaryEnrollment[e.student]
+    if (
+      !current ||
+      (e.status === 'ongoing' && current.status !== 'ongoing') ||
+      (e.status === current.status && e.start_date > current.start_date)
+    ) {
+      studentPrimaryEnrollment[e.student] = e
+    }
   }
 
   // Search is already applied server-side (see studentsPath above) — this only layers
@@ -232,7 +243,8 @@ export default function StudentsPage() {
               <th className="table-head-cell">Student ID</th>
               <th className="table-head-cell">Name</th>
               <th className="table-head-cell">Client</th>
-              <th className="table-head-cell">Status</th>
+              <th className="table-head-cell">Course/Batch</th>
+              <th className="table-head-cell">Progress</th>
               <th className="table-head-cell"></th>
             </tr>
           </thead>
@@ -245,7 +257,16 @@ export default function StudentsPage() {
                   <Link to={`/admin/students/${s.id}`} className="font-medium text-primary hover:underline focus-ring">{s.name}</Link>
                 </td>
                 <td className="table-cell">{s.source_type === 'B2B' ? (s.client_name || '—') : 'Own'}</td>
-                <td className="table-cell"><Badge status={s.status} /></td>
+                <td className="table-cell">
+                  {studentPrimaryEnrollment[s.id]
+                    ? `${studentPrimaryEnrollment[s.id].course_name} — Batch ${studentPrimaryEnrollment[s.id].batch_number}`
+                    : '—'}
+                </td>
+                <td className="table-cell tabular-nums">
+                  {studentPrimaryEnrollment[s.id]
+                    ? `${studentPrimaryEnrollment[s.id].classes_completed}/${studentPrimaryEnrollment[s.id].classes_total}`
+                    : '—'}
+                </td>
                 <td className="table-cell text-right">
                   {s.status === 'active' ? (
                     <button onClick={() => handleArchive(s.id)} className="text-xs text-text-secondary hover:text-error focus-ring">
@@ -260,10 +281,10 @@ export default function StudentsPage() {
               </tr>
             ))}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">No students found.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">No students found.</td></tr>
             )}
             {loading && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
             )}
           </tbody>
         </table>

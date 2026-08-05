@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
@@ -190,7 +189,8 @@ export default function TrainersPage() {
               <th className="table-head-cell">Name</th>
               <th className="table-head-cell">Phone</th>
               <th className="table-head-cell">Place</th>
-              <th className="table-head-cell">Status</th>
+              <th className="table-head-cell">Active students</th>
+              <th className="table-head-cell">Payout pending</th>
               <th className="table-head-cell"></th>
             </tr>
           </thead>
@@ -204,7 +204,8 @@ export default function TrainersPage() {
                 </td>
                 <td className="table-cell">{t.phone_number}</td>
                 <td className="table-cell">{t.place}</td>
-                <td className="table-cell"><Badge status={t.status} /></td>
+                <td className="table-cell">{t.active_student_count}</td>
+                <td className="table-cell tabular-nums text-warning font-medium">₹{t.payout_pending}</td>
                 <td className="table-cell text-right">
                   {t.status === 'active' ? (
                     <button onClick={() => handleArchive(t.id)} className="text-xs text-text-secondary hover:text-error focus-ring">
@@ -219,7 +220,7 @@ export default function TrainersPage() {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">No trainers found.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-text-tertiary">No trainers found.</td></tr>
             )}
           </tbody>
         </table>

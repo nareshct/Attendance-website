@@ -1,10 +1,15 @@
+from decimal import Decimal
+
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.db.models import Count, OuterRef, Q, Subquery, Sum
+from django.db.models.functions import Coalesce
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from billing.models import Payout
 from billing.services import current_cycle_summary
 from config.permissions import IsAdmin
 
@@ -13,10 +18,6 @@ from .serializers import TrainerCourseRateSerializer, TrainerSerializer
 
 
 class TrainerViewSet(ModelViewSet):
-    # prefetch_related('course_rates') because TrainerSerializer nests every trainer's
-    # course-rate overrides — without it, listing trainers triggers one extra query per
-    # row (same class of bug as StudentViewSet's client_name, see reports/scale_audit.py).
-    queryset = Trainer.objects.all().order_by('name').prefetch_related('course_rates')
     serializer_class = TrainerSerializer
     permission_classes = [IsAdmin]
     # ?search= matches name OR trainer_id OR place (case-insensitive substring) — mirrors
@@ -27,6 +28,27 @@ class TrainerViewSet(ModelViewSet):
     # No DELETE — trainers are only ever archived (see archive/unarchive below), never
     # hard-deleted, so their attendance/payout history can never be lost.
     http_method_names = ['get', 'post', 'put', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        # prefetch_related('course_rates') because TrainerSerializer nests every trainer's
+        # course-rate overrides — without it, listing trainers triggers one extra query per
+        # row (same class of bug as StudentViewSet's client_name, see reports/scale_audit.py).
+        # active_student_count is annotated for the same reason.
+        #
+        # pending_payout_amount is a Subquery rather than a second Sum/Count folded into
+        # this same .annotate() — aggregating over two different reverse relations
+        # (enrollments vs payouts) in one annotate() call multiplies rows before
+        # aggregating (Django's multi-relation fan-out), which would silently inflate
+        # active_student_count. A Subquery is independent of the outer join, so it
+        # sidesteps that entirely — see ClientViewSet.get_queryset() for the same pattern.
+        pending_payouts = (
+            Payout.objects.filter(trainer=OuterRef('pk'), paid_status='pending')
+            .order_by().values('trainer').annotate(total=Sum('total_amount')).values('total')
+        )
+        return Trainer.objects.all().order_by('name').prefetch_related('course_rates').annotate(
+            active_student_count=Count('enrollments', filter=Q(enrollments__status='ongoing')),
+            pending_payout_amount=Coalesce(Subquery(pending_payouts), Decimal('0.00')),
+        )
 
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
