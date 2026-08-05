@@ -862,7 +862,7 @@ export default function BatchDetailPage() {
         </form>
       </Modal>
 
-      <Card className="p-0 overflow-x-auto">
+      <Card className="p-0 overflow-x-auto mb-6">
         <table className="table">
           <thead className="table-head-row">
             <tr>
@@ -967,7 +967,7 @@ export default function BatchDetailPage() {
                 {importResult.skipped.length > 0 && (
                   <div>
                     <p className="text-warning font-medium">{importResult.skipped.length} row(s) skipped:</p>
-                    <ul className="list-disc pl-4 text-text-secondary">
+                    <ul className="list-disc pl-4 text-text-secondary max-h-40 overflow-y-auto">
                       {importResult.skipped.map((s, i) => <li key={i}>Row {s.row}: {s.reason}</li>)}
                     </ul>
                   </div>
@@ -1142,21 +1142,21 @@ export default function BatchDetailPage() {
                 </button>
               </div>
             </div>
-            <table className="w-full text-xs">
-              <thead className="text-text-secondary text-left">
+            <table className="table-compact">
+              <thead>
                 <tr>
-                  <th className="py-1 pr-4">Due</th>
-                  <th className="py-1 pr-4">Amount</th>
-                  <th className="py-1"></th>
+                  <th className="table-compact-head-cell">Due</th>
+                  <th className="table-compact-head-cell">Amount</th>
+                  <th className="table-compact-head-cell"></th>
                 </tr>
               </thead>
               <tbody>
                 {e.installments.map((inst) => (
-                  <tr key={inst.id} className="border-t border-gray-50">
-                    <td className="py-1 pr-4">
+                  <tr key={inst.id} className="table-compact-row">
+                    <td className="table-compact-cell">
                       {inst.due_at_sessions === null ? 'At signup' : `By session ${inst.due_at_sessions}`}
                     </td>
-                    <td className="py-1 pr-4 tabular-nums">
+                    <td className="table-compact-cell tabular-nums">
                       {editingInstallmentId === inst.id ? (
                         <input
                           type="number"
@@ -1170,7 +1170,7 @@ export default function BatchDetailPage() {
                         `₹${inst.amount}`
                       )}
                     </td>
-                    <td className="py-1 text-right whitespace-nowrap">
+                    <td className="table-compact-cell whitespace-nowrap">
                       {editingInstallmentId === inst.id ? (
                         <span>
                           <button disabled={busy} onClick={() => handleSaveInstallmentAmount(inst.id)} className="font-medium text-success hover:underline focus-ring">

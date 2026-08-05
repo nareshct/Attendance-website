@@ -74,10 +74,10 @@ export function Modal({ open, onClose, title, children, maxWidthClass = 'max-w-l
         aria-modal="true"
         aria-labelledby={title ? 'modal-title' : undefined}
         tabIndex={-1}
-        className={`relative my-8 w-full ${maxWidthClass} rounded-2xl bg-white shadow-xl`}
+        className={`relative my-8 flex max-h-[85vh] w-full flex-col ${maxWidthClass} rounded-2xl bg-white shadow-xl`}
       >
         {title && (
-          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
             <h3 id="modal-title" className="text-base font-semibold text-navy">{title}</h3>
             <button
               onClick={onClose}
@@ -88,7 +88,7 @@ export function Modal({ open, onClose, title, children, maxWidthClass = 'max-w-l
             </button>
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className="overflow-y-auto p-6">{children}</div>
       </div>
     </div>
   )
