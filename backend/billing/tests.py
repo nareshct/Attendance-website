@@ -59,15 +59,31 @@ class ClientTotalsAsOfTests(TestCase):
             topic_covered='intro', marked_by=self.trainer,
         )
 
-    def test_live_rate_used_when_as_of_not_given(self):
+    def test_each_class_priced_at_the_rate_in_effect_on_its_own_date(self):
+        """Without as_of (the all-time/multi-cycle case), each class must price at
+        whatever rate was actually in effect on THAT class's own date — not today's
+        live rate. This was itself a bug (client_all_time_totals() priced every
+        historical class at today's rate); fixed by grouping client_totals()'s
+        as_of=None path by date too and doing a per-date historical_rate() lookup.
+        """
         totals = client_totals(self.client_obj, datetime.date(2026, 1, 1), datetime.date(2026, 1, 31))
         self.assertEqual(totals['total_revenue'], Decimal('200.00'))
 
-        # Bump the client's rate — a live (as_of=None) query should reflect it immediately.
+        # Bump the client's rate today — the Jan 5th class must stay priced at the
+        # 200 that was actually in effect back then, not the new live 500.
         self.client_obj.rate_per_class = Decimal('500')
         self.client_obj.save()
         totals = client_totals(self.client_obj, datetime.date(2026, 1, 1), datetime.date(2026, 1, 31))
-        self.assertEqual(totals['total_revenue'], Decimal('500.00'))
+        self.assertEqual(totals['total_revenue'], Decimal('200.00'), "a past class must keep its own historical rate")
+
+        # A class taught today, though, should correctly pick up the new live rate —
+        # proving this isn't just "always use the oldest rate" overcorrection.
+        Attendance.objects.create(
+            enrollment=self.enrollment, date=datetime.date.today(), status='present',
+            topic_covered='new class after the rate bump', marked_by=self.trainer,
+        )
+        totals = client_totals(self.client_obj, datetime.date(2026, 1, 1), datetime.date.today())
+        self.assertEqual(totals['total_revenue'], Decimal('700.00'), "old class stays at 200, new class prices at the new 500")
 
     def test_as_of_pins_the_rate_that_was_in_effect_back_then(self):
         # Rate changes today; a lookup as_of a date BEFORE the change must still

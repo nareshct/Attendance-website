@@ -99,12 +99,17 @@ def get_or_create_cycle(for_date=None):
     return BillingCycle.objects.get_or_create(cycle_start=start, cycle_end=end)
 
 
-def trainer_totals_for_range(trainer, start, end):
+def trainer_totals_for_range(trainer, start, end, as_of=None):
     """Present classes and earnings for one trainer between start/end (inclusive), by course rate.
 
     Excludes attendance already carried forward via a PayoutAdjustment — its earnings
     are deliberately booked on a different cycle (see PayoutAdjustment), so counting
     it here too would double-pay the class.
+
+    Mirrors client_totals()'s as_of behavior: without it (the normal case — a cycle
+    can span a rate change), each class is priced individually at whatever rate was
+    actually in effect on *that class's own date*, via historical_rate(). Pass as_of
+    to instead price every class at the single rate in effect on that one date.
     """
     course_counts = (
         Attendance.objects.filter(
@@ -114,7 +119,7 @@ def trainer_totals_for_range(trainer, start, end):
             date__lte=end,
             payout_adjustment__isnull=True,
         )
-        .values('enrollment__course')
+        .values('enrollment__course', 'date')
         .annotate(count=Count('id'))
     )
 
@@ -129,7 +134,12 @@ def trainer_totals_for_range(trainer, start, end):
     for row in course_counts:
         course_id = row['enrollment__course']
         count = row['count']
-        rate = overrides.get(course_id, default_rate)
+        price_date = as_of if as_of is not None else row['date']
+
+        rate = historical_rate(trainer, course_id, price_date)
+        if rate is None:
+            rate = overrides.get(course_id, default_rate)
+
         total_classes += count
         total_amount += rate * count
 
@@ -241,9 +251,13 @@ def b2c_totals_for_range(start, end, as_of=None):
     its revenue is deliberately booked on a different cycle (see
     B2CRevenueAdjustment), so counting it here too would double-count the class.
 
-    Pass `as_of` to price using the rate that was in effect on that date
-    instead of today's live rate — see client_totals()'s `as_of`.
+    Pass `as_of` to price every class at the single rate in effect on that one
+    date. Without it, each class is instead priced individually at whatever
+    rate was actually in effect on *that class's own date* — see
+    client_totals()'s `as_of` for why a single as_of date would be wrong for a
+    range that can cross a rate change.
     """
+    group_fields = ['marked_by', 'enrollment__course'] if as_of is not None else ['marked_by', 'enrollment__course', 'date']
     rows = (
         Attendance.objects.filter(
             status='present',
@@ -252,7 +266,7 @@ def b2c_totals_for_range(start, end, as_of=None):
             enrollment__student__source_type='B2C',
             b2c_revenue_adjustment__isnull=True,
         )
-        .values('marked_by', 'enrollment__course')
+        .values(*group_fields)
         .annotate(count=Count('id'))
     )
 
@@ -263,10 +277,8 @@ def b2c_totals_for_range(start, end, as_of=None):
         for r in TrainerCourseRate.objects.filter(trainer_id__in=trainer_ids)
     }
     course_rates = {c.id: c.rate_per_class or Decimal('0.00') for c in Course.objects.all()}
-    courses_by_id = {}
-    if as_of is not None:
-        course_ids = {row['enrollment__course'] for row in rows}
-        courses_by_id = {c.id: c for c in Course.objects.filter(id__in=course_ids)}
+    course_ids = {row['enrollment__course'] for row in rows}
+    courses_by_id = {c.id: c for c in Course.objects.filter(id__in=course_ids)}
 
     total_classes = 0
     total_revenue = Decimal('0.00')
@@ -276,16 +288,13 @@ def b2c_totals_for_range(start, end, as_of=None):
         course_id = row['enrollment__course']
         count = row['count']
         trainer = trainers[trainer_id]
+        price_date = as_of if as_of is not None else row['date']
 
-        if as_of is not None:
-            trainer_rate = historical_rate(trainer, course_id, as_of)
-            if trainer_rate is None:
-                trainer_rate = trainer_overrides.get((trainer_id, course_id), trainer.default_rate_per_class or Decimal('0.00'))
-            course_rate = historical_rate(courses_by_id[course_id], None, as_of)
-            if course_rate is None:
-                course_rate = course_rates.get(course_id, Decimal('0.00'))
-        else:
+        trainer_rate = historical_rate(trainer, course_id, price_date)
+        if trainer_rate is None:
             trainer_rate = trainer_overrides.get((trainer_id, course_id), trainer.default_rate_per_class or Decimal('0.00'))
+        course_rate = historical_rate(courses_by_id[course_id], None, price_date)
+        if course_rate is None:
             course_rate = course_rates.get(course_id, Decimal('0.00'))
 
         total_classes += count
@@ -613,9 +622,22 @@ def compute_admin_alerts():
                 'classes_completed': enrollment.classes_completed,
             })
 
+    pending_payouts = []
+    for payout in Payout.objects.select_related('trainer', 'cycle').filter(paid_status='pending'):
+        pending_payouts.append({
+            'id': payout.id,
+            'trainer_id': payout.trainer_id,
+            'trainer_name': payout.trainer.name,
+            'cycle_start': payout.cycle.cycle_start,
+            'cycle_end': payout.cycle.cycle_end,
+            'amount': payout.total_amount,
+        })
+    pending_payouts.sort(key=lambda row: row['cycle_start'])
+
     return {
         'overdue_invoices': overdue_invoices,
         'due_installments': due_installments,
+        'pending_payouts': pending_payouts,
     }
 
 

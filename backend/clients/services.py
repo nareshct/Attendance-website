@@ -13,15 +13,19 @@ def client_totals(client, start=None, end=None, as_of=None):
     cost and the client's billing rate use a course-specific override when one
     exists, else fall back to each side's flat default rate.
 
-    Pass `as_of` to price using the rate that was in effect on that date instead
-    of today's live rate — used when freezing a closed billing cycle's snapshot
-    (see billing.services.snapshot_cycle_revenue), so a rate change made
-    afterward can't silently reprice a cycle that's already been invoiced.
+    Pass `as_of` to price every class at the single rate that was in effect on that
+    one date — used when freezing a closed billing cycle's snapshot (see
+    billing.services.snapshot_cycle_revenue), where "the whole cycle priced as of
+    its own close" is the correct model (a cycle is a couple of weeks; a rate
+    changing mid-cycle is an accepted edge case there).
+
+    Without `as_of` (the all-time / multi-cycle case), each class is instead priced
+    individually at whatever rate was actually in effect on *that class's own date*
+    — a single as_of date would be wrong here, since the span can cross a rate
+    change and a class from before it must still be priced at the old rate rather
+    than today's live one.
     """
-    historical_rate = None
-    if as_of is not None:
-        from billing.services import historical_rate as _historical_rate  # deferred: avoids a cross-app import cycle
-        historical_rate = _historical_rate
+    from billing.services import historical_rate  # deferred: avoids a cross-app import cycle
 
     # Exclude attendance already carried forward via a ClientInvoiceAdjustment — its
     # revenue is deliberately billed on a different cycle (see ClientInvoiceAdjustment),
@@ -34,7 +38,11 @@ def client_totals(client, start=None, end=None, as_of=None):
     if end is not None:
         qs = qs.filter(date__lte=end)
 
-    rows = qs.values('marked_by', 'enrollment__course').annotate(count=Count('id'))
+    # Grouped by date too (not just trainer+course) when as_of isn't fixing the whole
+    # query to one date — classes on different dates can fall either side of a rate
+    # change, so each date's group needs its own rate lookup.
+    group_fields = ['marked_by', 'enrollment__course'] if as_of is not None else ['marked_by', 'enrollment__course', 'date']
+    rows = qs.values(*group_fields).annotate(count=Count('id'))
 
     trainer_ids = {row['marked_by'] for row in rows}
     trainers = {t.id: t for t in Trainer.objects.filter(id__in=trainer_ids)}
@@ -56,16 +64,13 @@ def client_totals(client, start=None, end=None, as_of=None):
         course_id = row['enrollment__course']
         count = row['count']
         trainer = trainers[trainer_id]
+        price_date = as_of if as_of is not None else row['date']
 
-        if historical_rate is not None:
-            trainer_rate = historical_rate(trainer, course_id, as_of)
-            if trainer_rate is None:
-                trainer_rate = trainer_overrides.get((trainer_id, course_id), trainer.default_rate_per_class or Decimal('0.00'))
-            client_rate = historical_rate(client, course_id, as_of)
-            if client_rate is None:
-                client_rate = client_overrides.get(course_id, client_default_rate)
-        else:
+        trainer_rate = historical_rate(trainer, course_id, price_date)
+        if trainer_rate is None:
             trainer_rate = trainer_overrides.get((trainer_id, course_id), trainer.default_rate_per_class or Decimal('0.00'))
+        client_rate = historical_rate(client, course_id, price_date)
+        if client_rate is None:
             client_rate = client_overrides.get(course_id, client_default_rate)
 
         total_classes += count
