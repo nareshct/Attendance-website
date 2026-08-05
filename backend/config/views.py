@@ -147,7 +147,7 @@ class PasswordResetRequestView(APIView):
                 subject='Apex Binary: Reset your password',
                 message=(
                     f'A password reset was requested for the "{username}" account.\n\n'
-                    f'Reset it here (this link expires in 3 days):\n{reset_url}\n\n'
+                    f'Reset it here (this link expires in 15 minutes):\n{reset_url}\n\n'
                     "If you didn't request this, you can safely ignore this email."
                 ),
                 from_email=settings.DEFAULT_FROM_EMAIL,

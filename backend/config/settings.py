@@ -257,6 +257,11 @@ SERVER_EMAIL = config('SERVER_EMAIL', default=EMAIL_HOST_USER or 'no-reply@local
 # Base URL of the frontend — used to build the link inside the password-reset email.
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5173')
 
+# How long a password-reset link stays valid, in seconds — enforced by Django's
+# default_token_generator (used in PasswordResetConfirmView). Default is 3 days;
+# tightened to 15 minutes since these links go out over email.
+PASSWORD_RESET_TIMEOUT = 900
+
 # Who gets emailed on an unhandled 500/exception (see LOGGING below) — e.g.
 # "Admin One:admin1@example.com,Admin Two:admin2@example.com". Empty by default: Django's
 # mail_admins() silently no-ops if ADMINS is empty, so this is safe to leave unset in dev.
