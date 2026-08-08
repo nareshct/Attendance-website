@@ -87,6 +87,61 @@ def client_totals(client, start=None, end=None, as_of=None):
     }
 
 
+def get_archive_blockers(client):
+    """Everything still tying this client to active/unresolved billing — hard-
+    blocks ClientViewSet.archive() until it's empty. See ArchiveClientModal.
+
+    Imported lazily, not at module level — same reasoning as config.views.SearchView:
+    keeps the clients app from taking a hard import dependency on every domain app
+    that happens to reference Client.
+    """
+    from django.db.models import Prefetch
+
+    from billing.models import ClientInvoice
+    from billing.services import client_current_cycle_totals
+    from enrollments.models import Enrollment
+    from students.models import Student
+
+    active_students = Student.objects.filter(client=client, status='active').prefetch_related(
+        Prefetch('enrollments', queryset=Enrollment.objects.select_related('course').order_by('course__name')),
+    ).order_by('name')
+    pending_invoices = ClientInvoice.objects.filter(
+        client=client, status='pending', cycle__status='closed',
+    ).select_related('cycle').order_by('cycle__cycle_start')
+    current = client_current_cycle_totals(client)
+
+    return {
+        'active_students': [
+            {
+                'id': s.id,
+                'name': s.name,
+                'enrollments': [
+                    {
+                        'id': e.id,
+                        'course_name': e.course.name,
+                        'batch_number': e.batch_number,
+                        'classes_completed': e.classes_completed,
+                        'classes_total': e.classes_total,
+                        'status': e.status,
+                    }
+                    for e in s.enrollments.all()
+                ],
+            }
+            for s in active_students
+        ],
+        'pending_invoices': [
+            {
+                'id': inv.id,
+                'cycle_start': inv.cycle.cycle_start,
+                'cycle_end': inv.cycle.cycle_end,
+                'amount': inv.total_amount,
+            }
+            for inv in pending_invoices
+        ],
+        'current_cycle_unbilled': current['total_revenue'],
+    }
+
+
 def client_course_breakdown(client, start, end):
     """Per-course classes/rate/amount for a client within [start, end] (inclusive),
     for itemized invoice line items. Same present-attendance scope as client_totals

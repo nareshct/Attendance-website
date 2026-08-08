@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
@@ -14,7 +15,7 @@ from students.models import Student
 
 from .models import Client, ClientContact, ClientCourseRate
 from .serializers import ClientContactSerializer, ClientCourseRateSerializer, ClientSerializer
-from .services import client_totals
+from .services import client_totals, get_archive_blockers
 
 
 class ClientViewSet(ModelViewSet):
@@ -52,7 +53,12 @@ class ClientViewSet(ModelViewSet):
     @action(detail=False, methods=['get'])
     def summary(self, request):
         """Top-line stats for a dashboard header on the Clients list."""
-        active_clients = Client.objects.filter(status='active').annotate(
+        # Every client, not just active ones — an archived client can still have real
+        # unpaid invoices or unbilled current-cycle revenue, and that money doesn't
+        # stop being owed just because the client was archived. Mirrors
+        # billing.services.compute_admin_alerts(), which deliberately doesn't filter
+        # overdue_invoices by client status either.
+        all_clients = Client.objects.annotate(
             pending_amount=Coalesce(
                 Sum('invoices__total_amount', filter=Q(invoices__status='pending', invoices__cycle__status='closed')),
                 Decimal('0.00'),
@@ -61,7 +67,7 @@ class ClientViewSet(ModelViewSet):
         current_cycle, _ = get_or_create_cycle()
 
         total_pending = Decimal('0.00')
-        for client in active_clients:
+        for client in all_clients:
             current = client_current_cycle_totals(client, cycle=current_cycle)
             total_pending += current['total_revenue'] + (client.pending_amount or Decimal('0.00'))
 
@@ -80,9 +86,28 @@ class ClientViewSet(ModelViewSet):
             'total_classes': total_classes,
         })
 
+    @action(detail=True, methods=['get'], url_path='archive-blockers')
+    def archive_blockers(self, request, pk=None):
+        """Everything still tying this client to active/unresolved billing — the
+        frontend fetches this to build the archive warning checklist, and
+        `archive()` below re-checks the same thing server-side so it can't be
+        bypassed by calling the API directly. See services.get_archive_blockers."""
+        client = self.get_object()
+        return Response(get_archive_blockers(client))
+
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
         client = self.get_object()
+        blockers = get_archive_blockers(client)
+        if blockers['active_students'] or blockers['pending_invoices'] or Decimal(blockers['current_cycle_unbilled']) > 0:
+            return Response(
+                {
+                    'detail': 'This client still has active students, pending invoices, or unbilled '
+                    'current-cycle classes — resolve them first.',
+                    'blockers': blockers,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         client.status = 'archived'
         client.save(update_fields=['status'])
         return Response(ClientSerializer(client).data)

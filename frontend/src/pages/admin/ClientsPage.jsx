@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ArchiveClientModal } from '../../components/ArchiveClientModal'
 import { Button } from '../../components/Button'
 import { Card, StatCard } from '../../components/Card'
 import { Modal } from '../../components/Modal'
@@ -48,10 +49,11 @@ export default function ClientsPage() {
     }
   }
 
-  async function handleArchive(id) {
-    await api(`/api/clients/${id}/archive/`, { method: 'POST' })
-    await loadClients()
-    await loadSummary()
+  const [archiveTarget, setArchiveTarget] = useState(null)
+
+  function handleArchived() {
+    loadClients()
+    loadSummary()
   }
 
   async function handleUnarchive(id) {
@@ -145,7 +147,7 @@ export default function ClientsPage() {
                 </td>
                 <td className="table-cell text-right">
                   {c.status === 'active' ? (
-                    <button onClick={() => handleArchive(c.id)} className="text-xs text-text-secondary hover:text-error focus-ring">
+                    <button onClick={() => setArchiveTarget(c)} className="text-xs text-text-secondary hover:text-error focus-ring">
                       Archive
                     </button>
                   ) : (
@@ -162,6 +164,14 @@ export default function ClientsPage() {
           </tbody>
         </table>
       </Card>
+
+      <ArchiveClientModal
+        open={Boolean(archiveTarget)}
+        clientId={archiveTarget?.id}
+        clientName={archiveTarget?.company_name}
+        onClose={() => setArchiveTarget(null)}
+        onArchived={handleArchived}
+      />
     </div>
   )
 }
