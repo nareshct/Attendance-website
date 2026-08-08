@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Modal } from '../../components/Modal'
 import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
@@ -24,6 +25,15 @@ export default function TrainerBatchesPage() {
   const [sessionForm, setSessionForm] = useState(EMPTY_SESSION_FORM)
   const [logError, setLogError] = useState('')
   const [logging, setLogging] = useState(false)
+
+  const [editTarget, setEditTarget] = useState(null)
+  const [editForm, setEditForm] = useState(EMPTY_SESSION_FORM)
+  const [editError, setEditError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   const loadBatches = useCallback(() => {
     // The nav link to this page is already hidden for a trainer on zero batches
@@ -54,6 +64,11 @@ export default function TrainerBatchesPage() {
     setLogError('')
   }
 
+  async function reloadSessions(batchId) {
+    const updated = await api(`/api/batch-sessions/?batch=${batchId}`)
+    setSessionsByBatch((prev) => ({ ...prev, [batchId]: updated }))
+  }
+
   async function handleLogSession(e) {
     e.preventDefault()
     setLogging(true)
@@ -63,13 +78,51 @@ export default function TrainerBatchesPage() {
         method: 'POST',
         body: { batch: logTarget.id, conducted_by_name: auth.name, ...sessionForm },
       })
-      const updated = await api(`/api/batch-sessions/?batch=${logTarget.id}`)
-      setSessionsByBatch((prev) => ({ ...prev, [logTarget.id]: updated }))
+      await reloadSessions(logTarget.id)
       setLogTarget(null)
     } catch (err) {
       setLogError(err.message)
     } finally {
       setLogging(false)
+    }
+  }
+
+  function openEditSession(batch, session) {
+    setEditTarget({ batch, session })
+    setEditForm({
+      date: session.date,
+      topic_covered: session.topic_covered || '',
+      recording_link: session.recording_link || '',
+    })
+    setEditError('')
+  }
+
+  async function handleSaveEdit(e) {
+    e.preventDefault()
+    setSaving(true)
+    setEditError('')
+    try {
+      await api(`/api/batch-sessions/${editTarget.session.id}/`, { method: 'PATCH', body: editForm })
+      await reloadSessions(editTarget.batch.id)
+      setEditTarget(null)
+    } catch (err) {
+      setEditError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteSession() {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await api(`/api/batch-sessions/${deleteTarget.session.id}/`, { method: 'DELETE' })
+      await reloadSessions(deleteTarget.batch.id)
+      setDeleteTarget(null)
+    } catch (err) {
+      setDeleteError(err.message)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -109,20 +162,34 @@ export default function TrainerBatchesPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3 pt-3 border-t border-gray-100">
               <div>
                 <p className="text-xs text-text-secondary mb-1">Sessions logged ({(sessionsByBatch[b.id] || []).length})</p>
-                <ul className="text-xs text-gray-600 space-y-1 max-h-32 overflow-y-auto">
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
                   {(sessionsByBatch[b.id] || []).map((s) => (
-                    <li key={s.id}>
-                      {formatDate(s.date)}{s.topic_covered && ` — ${s.topic_covered}`}
-                      {s.recording_link && (
-                        <>
-                          {' · '}
-                          <a href={s.recording_link} target="_blank" rel="noreferrer" className="text-primary hover:underline">Recording</a>
-                        </>
+                    <div key={s.id} className="flex items-center justify-between gap-2 rounded-md border border-gray-100 bg-surface-sunken px-2.5 py-1.5">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-navy truncate">
+                          {formatDate(s.date)}{s.topic_covered && ` — ${s.topic_covered}`}
+                        </p>
+                        {s.recording_link && (
+                          <a href={s.recording_link} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
+                            Recording
+                          </a>
+                        )}
+                      </div>
+                      {s.can_edit && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button type="button" onClick={() => openEditSession(b, s)} className="text-xs font-medium text-primary hover:underline">
+                            Edit
+                          </button>
+                          <span className="text-gray-300">·</span>
+                          <button type="button" onClick={() => { setDeleteTarget({ batch: b, session: s }); setDeleteError('') }} className="text-xs font-medium text-error hover:underline">
+                            Delete
+                          </button>
+                        </div>
                       )}
-                    </li>
+                    </div>
                   ))}
-                  {(sessionsByBatch[b.id] || []).length === 0 && <li className="text-text-tertiary">No sessions logged yet.</li>}
-                </ul>
+                  {(sessionsByBatch[b.id] || []).length === 0 && <p className="text-xs text-text-tertiary">No sessions logged yet.</p>}
+                </div>
               </div>
               <div>
                 <p className="text-xs text-text-secondary mb-1">Your payouts on this batch</p>
@@ -130,7 +197,7 @@ export default function TrainerBatchesPage() {
                   {(payoutsByBatch[b.id] || []).map((p) => (
                     <li key={p.id} className="flex items-center justify-between">
                       <span className="tabular-nums">₹{p.amount}</span>
-                      <Badge status={p.paid ? 'paid' : 'pending'} />
+                      <Badge status={p.paid_status} />
                     </li>
                   ))}
                   {(payoutsByBatch[b.id] || []).length === 0 && <li className="text-text-tertiary">No payout recorded yet.</li>}
@@ -161,6 +228,39 @@ export default function TrainerBatchesPage() {
           </form>
         )}
       </Modal>
+
+      <Modal open={Boolean(editTarget)} onClose={() => setEditTarget(null)} title="Edit session">
+        {editTarget && (
+          <form onSubmit={handleSaveEdit} className="space-y-3">
+            <p className="text-sm text-text-secondary">{editTarget.batch.name}</p>
+            <input required type="date" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })} className="input" />
+            <input placeholder="Topic covered (optional)" value={editForm.topic_covered} onChange={(e) => setEditForm({ ...editForm, topic_covered: e.target.value })} className="input" />
+            <input placeholder="Recording link (Google Drive, optional)" value={editForm.recording_link} onChange={(e) => setEditForm({ ...editForm, recording_link: e.target.value })} className="input" />
+            {editError && <p className="text-error text-xs">{editError}</p>}
+            <div className="flex justify-end gap-3">
+              <Button type="button" variant="ghost" onClick={() => setEditTarget(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="success" disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteSession}
+        title="Delete session"
+        message={`Delete the session logged for ${deleteTarget ? formatDate(deleteTarget.session.date) : ''}? This cannot be undone.`}
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        danger
+        busy={deleting}
+        error={deleteError}
+      />
     </div>
   )
 }
