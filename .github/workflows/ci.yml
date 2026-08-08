@@ -36,6 +36,13 @@ jobs:
         env:
           SECRET_KEY: ci-only-secret-key
           DEBUG: 'False'
+          # DEBUG=False turns on SECURE_SSL_REDIRECT by default (see config/settings.py)
+          # — correct in production behind Render's real HTTPS proxy, but CI's test
+          # client makes plain http:// requests with no X-Forwarded-Proto header, so
+          # any test going through the full middleware stack (not just
+          # APIRequestFactory + as_view(), which bypasses middleware) gets 301-redirected
+          # instead of reaching the view. Doesn't affect the deployed app's security.
+          SECURE_SSL_REDIRECT: 'False'
 
   frontend:
     name: Frontend (React/Vite)
