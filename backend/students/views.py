@@ -15,7 +15,7 @@ from audit.services import log_action
 from config.permissions import IsAdmin, IsAdminOrTrainer
 from config.throttling import ParentLinkRateThrottle
 from enrollments.certificate_pdf import render_certificate_pdf
-from enrollments.models import Enrollment, SubstituteAssignment
+from enrollments.models import Enrollment, PaymentInstallment, SubstituteAssignment
 from enrollments.serializers import PaymentPlanSerializer
 from enrollments.services import trainer_payment_gate
 
@@ -99,9 +99,50 @@ class StudentViewSet(ModelViewSet):
             return [IsAdminOrTrainer()]
         return [IsAdmin()]
 
+    @action(detail=True, methods=['get'], url_path='archive-blockers')
+    def archive_blockers(self, request, pk=None):
+        """Feeds the Archive confirmation dialog. `ongoing_enrollments` hard-blocks
+        archiving (see archive() below) — a student can't be archived while still
+        taking classes, mirroring TrainerViewSet.archive. `pending_installments`
+        is informational only, not a blocker: withdrawing an ongoing enrollment
+        already auto-cancels any pending installment tied to it (see
+        EnrollmentViewSet.withdraw), so this only ever lists installments on a
+        non-ongoing (already completed) enrollment — nothing left to withdraw
+        would resolve them."""
+        student = self.get_object()
+        ongoing_enrollments = student.enrollments.filter(status='ongoing').select_related('course', 'trainer').order_by('course__name')
+        pending_installments = PaymentInstallment.objects.filter(
+            plan__enrollment__student=student, paid_status='pending',
+        ).select_related('plan__enrollment__course').order_by('plan__enrollment__course__name', 'sequence')
+        return Response({
+            'ongoing_enrollments': [
+                {
+                    'id': e.id,
+                    'course_name': e.course.name,
+                    'trainer_name': e.trainer.name,
+                    'batch_number': e.batch_number,
+                }
+                for e in ongoing_enrollments
+            ],
+            'pending_installments': [
+                {
+                    'id': i.id,
+                    'course_name': i.plan.enrollment.course.name,
+                    'sequence': i.sequence,
+                    'amount': i.amount,
+                    'due_at_classes': i.due_at_classes,
+                }
+                for i in pending_installments
+            ],
+        })
+
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
         student = self.get_object()
+        if student.enrollments.filter(status='ongoing').exists():
+            return Response(
+                {'detail': 'This student still has ongoing batches — withdraw them first.'}, status=400,
+            )
         student.status = 'archived'
         student.save(update_fields=['status'])
         return Response(StudentSerializer(student).data)
@@ -156,6 +197,11 @@ class StudentViewSet(ModelViewSet):
 
         user = request.user
         if not user.is_staff:
+            # Mirrors MyStudentsView's exclude(student__status='archived') — a trainer
+            # shouldn't be able to reach an archived student's profile directly
+            # (e.g. a stale bookmark) any more than they can find them listed.
+            if student.status == 'archived':
+                return Response({'detail': 'Not found.'}, status=404)
             today = timezone.localdate()
             substitute_enrollment_ids = SubstituteAssignment.objects.filter(
                 substitute_trainer=user.trainer, start_date__lte=today, end_date__gte=today,

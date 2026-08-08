@@ -300,6 +300,15 @@ class MyStudentsView(ListAPIView):
     currently covering as a substitute (see SubstituteAssignment) — those get
     a `covering_for` name so the frontend can label them distinctly.
 
+    Excludes archived students entirely — this is the single shared source for
+    My Students, the trainer dashboard's weekly schedule, and the attendance-
+    marking picker, so filtering here removes an archived student from all
+    three at once. A student can only be archived once none of their
+    enrollments are ongoing (see StudentViewSet.archive), so this only ever
+    hides already-completed/withdrawn batches from a trainer's own view — see
+    StudentViewSet.profile() for the matching block on viewing their profile
+    page directly.
+
     B2C enrollments with a payment plan are additionally gated on payment status —
     see trainer_payment_gate(). An enrollment whose first payment hasn't been
     recorded yet is left out entirely; one that's fallen behind on a later
@@ -326,6 +335,7 @@ class MyStudentsView(ListAPIView):
             Enrollment.objects.select_related('student', 'course', 'trainer', 'payment_plan')
             .prefetch_related('payment_plan__installments')
             .filter(Q(trainer=self.request.user.trainer) | Q(id__in=substitute_enrollment_ids))
+            .exclude(student__status='archived')
             .order_by('-start_date')
         )
 

@@ -15,7 +15,7 @@ from .certificate_pdf import render_certificate_pdf
 from .models import Enrollment, SubstituteAssignment
 from .report_pdf import render_student_report_pdf
 from .services import create_payment_plan, trainer_payment_gate, upfront_payment_for
-from .views import EnrollmentViewSet, PaymentInstallmentViewSet
+from .views import EnrollmentViewSet, MyStudentsView, PaymentInstallmentViewSet
 
 
 def _make_trainer(username='trainer'):
@@ -661,3 +661,34 @@ class InstallmentMarkPaidRevokeTests(APITestCase):
         self.assertEqual(self.installment.paid_status, 'pending')
         self.assertIsNone(self.installment.paid_date)
         self.assertTrue(AuditLog.objects.filter(action='installment_revoke').exists())
+
+
+class MyStudentsExcludesArchivedStudentsTests(APITestCase):
+    """An archived student must disappear from a trainer's own view entirely —
+    My Students, the dashboard's weekly schedule, and the attendance-marking
+    picker all read from this same endpoint. See MyStudentsView.get_queryset().
+    """
+
+    def _list(self, trainer):
+        factory = APIRequestFactory()
+        request = factory.get('/api/my-students/')
+        force_authenticate(request, user=trainer.user)
+        return MyStudentsView.as_view()(request)
+
+    def test_archived_students_enrollment_is_excluded(self):
+        trainer = _make_trainer(username='trainer_archived_student_check')
+        enrollment = _make_enrollment(trainer)
+        enrollment.student.status = 'archived'
+        enrollment.student.save(update_fields=['status'])
+
+        response = self._list(trainer)
+
+        self.assertEqual(response.data, [])
+
+    def test_active_students_enrollment_still_shows(self):
+        trainer = _make_trainer(username='trainer_active_student_check')
+        _make_enrollment(trainer)
+
+        response = self._list(trainer)
+
+        self.assertEqual(len(response.data), 1)

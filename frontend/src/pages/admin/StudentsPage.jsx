@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ArchiveStudentModal } from '../../components/ArchiveStudentModal'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
@@ -116,10 +117,7 @@ export default function StudentsPage() {
     }
   }
 
-  async function handleArchive(id) {
-    await api(`/api/students/${id}/archive/`, { method: 'POST' })
-    await reload()
-  }
+  const [archiveTarget, setArchiveTarget] = useState(null)
 
   async function handleUnarchive(id) {
     await api(`/api/students/${id}/unarchive/`, { method: 'POST' })
@@ -154,7 +152,7 @@ export default function StudentsPage() {
           {form.source_type === 'B2B' && (
             <select required value={form.client} onChange={(e) => setForm({ ...form, client: e.target.value })} className="input">
               <option value="">Select client…</option>
-              {clients.map((c) => (
+              {clients.filter((c) => c.status === 'active').map((c) => (
                 <option key={c.id} value={c.id}>{c.company_name}</option>
               ))}
             </select>
@@ -269,7 +267,7 @@ export default function StudentsPage() {
                 </td>
                 <td className="table-cell text-right">
                   {s.status === 'active' ? (
-                    <button onClick={() => handleArchive(s.id)} className="text-xs text-text-secondary hover:text-error focus-ring">
+                    <button onClick={() => setArchiveTarget(s)} className="text-xs text-text-secondary hover:text-error focus-ring">
                       Archive
                     </button>
                   ) : (
@@ -314,6 +312,15 @@ export default function StudentsPage() {
           </div>
         </div>
       )}
+
+      <ArchiveStudentModal
+        open={Boolean(archiveTarget)}
+        studentId={archiveTarget?.id}
+        studentName={archiveTarget?.name}
+        sourceType={archiveTarget?.source_type}
+        onClose={() => setArchiveTarget(null)}
+        onArchived={reload}
+      />
     </div>
   )
 }
