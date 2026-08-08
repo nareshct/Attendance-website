@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { downloadFile } from '../../api/client'
+import { ActiveStudentsModal } from '../../components/ActiveStudentsModal'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -20,6 +21,8 @@ export default function ClientDetailPage() {
   const [downloadingId, setDownloadingId] = useState(null)
   const [client, setClient] = useState(null)
   const [students, setStudents] = useState([])
+  const [enrollments, setEnrollments] = useState([])
+  const [showActiveStudents, setShowActiveStudents] = useState(false)
   const [invoices, setInvoices] = useState([])
   const [currentCycle, setCurrentCycle] = useState(null)
   const [history, setHistory] = useState([])
@@ -64,6 +67,7 @@ export default function ClientDetailPage() {
   useEffect(() => {
     loadClient().catch((err) => setError(err.message))
     api(`/api/students/?client=${id}`).then(setStudents).catch(() => {})
+    api(`/api/enrollments/?client=${id}`).then(setEnrollments).catch(() => {})
     api('/api/courses/').then(setCourses).catch(() => {})
     loadInvoices().catch(() => {})
     loadCurrentCycle().catch(() => {})
@@ -250,6 +254,7 @@ export default function ClientDetailPage() {
 
   const ratedCourseIds = new Set(client.course_rates.map((r) => r.course))
   const availableCourses = courses.filter((c) => !ratedCourseIds.has(c.id))
+  const ongoingEnrollments = enrollments.filter((e) => e.status === 'ongoing')
 
   return (
     <div>
@@ -267,7 +272,21 @@ export default function ClientDetailPage() {
           <div><dt className="text-text-secondary">Contact phone</dt><dd>{client.contact_phone}</dd></div>
           <div><dt className="text-text-secondary">Contact email</dt><dd>{client.contact_email || '—'}</dd></div>
           <div><dt className="text-text-secondary">Rate per class</dt><dd>{client.rate_per_class != null ? `₹${client.rate_per_class}` : '—'}</dd></div>
-          <div><dt className="text-text-secondary">Students</dt><dd>{students.length}</dd></div>
+          <div>
+            <dt className="text-text-secondary">Active students</dt>
+            <dd className="flex items-center gap-2">
+              <span>{ongoingEnrollments.length}</span>
+              {ongoingEnrollments.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowActiveStudents(true)}
+                  className="text-xs font-medium text-primary hover:underline focus-ring"
+                >
+                  Details
+                </button>
+              )}
+            </dd>
+          </div>
         </dl>
 
         {client.contacts.length > 0 && (
@@ -638,6 +657,20 @@ export default function ClientDetailPage() {
         danger
         busy={deletingRateId === rateDeleteTarget}
         error={rateError}
+      />
+
+      <ActiveStudentsModal
+        open={showActiveStudents}
+        onClose={() => setShowActiveStudents(false)}
+        title={`${client.company_name} — active students`}
+        rows={ongoingEnrollments.map((e) => ({
+          id: e.id,
+          studentId: e.student,
+          studentName: e.student_name,
+          courseName: e.course_name,
+          classesCompleted: e.classes_completed,
+          classesTotal: e.classes_total,
+        }))}
       />
     </div>
   )

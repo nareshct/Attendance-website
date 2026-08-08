@@ -53,31 +53,41 @@ export default function MyStudentsPage() {
         <table className="table">
           <thead className="table-head-row">
             <tr>
+              {tab === 'completed' && <th className="table-head-cell">#</th>}
               <th className="table-head-cell">Student</th>
               <th className="table-head-cell">Course</th>
               <th className="table-head-cell">Batch</th>
               <th className="table-head-cell">Progress</th>
-              <th className="table-head-cell">Status</th>
+              {tab === 'ongoing' && <th className="table-head-cell">Status</th>}
             </tr>
           </thead>
           <tbody>
-            {filtered.map((e) => (
+            {filtered.map((e, i) => (
               <tr key={e.id} className="table-row">
+                {tab === 'completed' && <td className="table-cell text-gray-400">{i + 1}</td>}
                 <td className="table-cell">
-                  <Link to={`/trainer/students/${e.student}`} className="text-brand-blue hover:underline focus-ring">{e.student_name}</Link>
-                  {e.covering_for && (
-                    <span className="block text-xs text-brand-violet mt-1">Covering for {e.covering_for}</span>
+                  {tab === 'ongoing' ? (
+                    <>
+                      <Link to={`/trainer/students/${e.student}`} className="text-brand-blue hover:underline focus-ring">{e.student_name}</Link>
+                      {e.covering_for && (
+                        <span className="block text-xs text-brand-violet mt-1">Covering for {e.covering_for}</span>
+                      )}
+                    </>
+                  ) : (
+                    e.student_name
                   )}
                 </td>
                 <td className="table-cell">{e.course_name}</td>
                 <td className="table-cell">{e.batch_number}</td>
                 <td className="table-cell">{e.classes_completed}/{e.classes_total}</td>
-                <td className="table-cell">
-                  <Badge status={e.status} />
-                  {e.payment_blocked && (
-                    <span className="block text-xs text-brand-amber mt-1">Payment pending — schedule paused</span>
-                  )}
-                </td>
+                {tab === 'ongoing' && (
+                  <td className="table-cell">
+                    <Badge status={e.status} />
+                    {e.payment_blocked && (
+                      <span className="block text-xs text-brand-amber mt-1">Payment pending — schedule paused</span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
             {filtered.length === 0 && (

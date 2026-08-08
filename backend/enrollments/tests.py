@@ -7,6 +7,7 @@ from rest_framework.test import APIRequestFactory, APITestCase, force_authentica
 
 from attendance.views import AttendanceViewSet
 from audit.models import AuditLog
+from clients.models import Client
 from courses.models import Course
 from students.models import Student
 from trainers.models import Trainer
@@ -295,6 +296,39 @@ class EnrollmentSearchTests(APITestCase):
     def test_search_with_no_match_returns_empty(self):
         response = self._search('nonexistent-name-xyz')
         self.assertEqual(response.data['results'], [])
+
+
+class EnrollmentClientFilterTests(APITestCase):
+    """?client= must return only enrollments whose student belongs to that
+    client — powers ClientDetailPage's "Active students" popup. See
+    EnrollmentViewSet.get_queryset().
+    """
+
+    def test_client_filter_returns_only_that_clients_enrollments(self):
+        admin = get_user_model().objects.create_user(username='admin_enrollment_client_filter', password='x', is_staff=True)
+        trainer = _make_trainer(username='trainer_enrollment_client_filter')
+        client_a = Client.objects.create(company_name='Filter Co A', contact_phone='1', rate_per_class=Decimal('200'))
+        client_b = Client.objects.create(company_name='Filter Co B', contact_phone='2', rate_per_class=Decimal('200'))
+        course = Course.objects.create(name='Filter Course', total_classes=24)
+
+        student_a = Student.objects.create(name='Kid A', grade='5', source_type='B2B', client=client_a)
+        student_b = Student.objects.create(name='Kid B', grade='5', source_type='B2B', client=client_b)
+        enrollment_a = Enrollment.objects.create(
+            student=student_a, course=course, trainer=trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        Enrollment.objects.create(
+            student=student_b, course=course, trainer=trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='11:00', class_days='TUE',
+        )
+
+        factory = APIRequestFactory()
+        request = factory.get(f'/api/enrollments/?client={client_a.id}')
+        force_authenticate(request, user=admin)
+        response = EnrollmentViewSet.as_view({'get': 'list'})(request)
+
+        ids = [row['id'] for row in response.data['results']]
+        self.assertEqual(ids, [enrollment_a.id])
 
 
 class PaymentPlanRecalculationTests(APITestCase):
@@ -664,9 +698,13 @@ class InstallmentMarkPaidRevokeTests(APITestCase):
 
 
 class MyStudentsExcludesArchivedStudentsTests(APITestCase):
-    """An archived student must disappear from a trainer's own view entirely —
-    My Students, the dashboard's weekly schedule, and the attendance-marking
-    picker all read from this same endpoint. See MyStudentsView.get_queryset().
+    """An archived student's ongoing/withdrawn enrollments disappear from a
+    trainer's own view — My Students, the dashboard's weekly schedule/"Batches
+    completed" count, and the attendance-marking picker all read from this
+    same endpoint. A *completed* enrollment is the one exception: it stays
+    visible even after the student is archived, since that's the trainer's own
+    teaching history, not something archiving (routine admin housekeeping)
+    should erase. See MyStudentsView.get_queryset().
     """
 
     def _list(self, trainer):
@@ -675,7 +713,7 @@ class MyStudentsExcludesArchivedStudentsTests(APITestCase):
         force_authenticate(request, user=trainer.user)
         return MyStudentsView.as_view()(request)
 
-    def test_archived_students_enrollment_is_excluded(self):
+    def test_archived_students_ongoing_enrollment_is_excluded(self):
         trainer = _make_trainer(username='trainer_archived_student_check')
         enrollment = _make_enrollment(trainer)
         enrollment.student.status = 'archived'
@@ -684,6 +722,19 @@ class MyStudentsExcludesArchivedStudentsTests(APITestCase):
         response = self._list(trainer)
 
         self.assertEqual(response.data, [])
+
+    def test_archived_students_completed_enrollment_still_shows(self):
+        trainer = _make_trainer(username='trainer_archived_completed_check')
+        enrollment = _make_enrollment(trainer)
+        enrollment.status = 'completed'
+        enrollment.student.status = 'archived'
+        enrollment.save(update_fields=['status'])
+        enrollment.student.save(update_fields=['status'])
+
+        response = self._list(trainer)
+
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['status'], 'completed')
 
     def test_active_students_enrollment_still_shows(self):
         trainer = _make_trainer(username='trainer_active_student_check')

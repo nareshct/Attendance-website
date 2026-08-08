@@ -46,6 +46,9 @@ class EnrollmentViewSet(ModelViewSet):
         trainer_id = self.request.query_params.get('trainer')
         if trainer_id:
             qs = qs.filter(trainer_id=trainer_id)
+        client_id = self.request.query_params.get('client')
+        if client_id:
+            qs = qs.filter(student__client_id=client_id)
         return qs
 
     @action(detail=True, methods=['post'])
@@ -300,21 +303,16 @@ class MyStudentsView(ListAPIView):
     currently covering as a substitute (see SubstituteAssignment) — those get
     a `covering_for` name so the frontend can label them distinctly.
 
-    Excludes archived students entirely — this is the single shared source for
-    My Students, the trainer dashboard's weekly schedule, and the attendance-
-    marking picker, so filtering here removes an archived student from all
-    three at once. A student can only be archived once none of their
-    enrollments are ongoing (see StudentViewSet.archive), so this only ever
-    hides already-completed/withdrawn batches from a trainer's own view — see
-    StudentViewSet.profile() for the matching block on viewing their profile
-    page directly.
-
-    B2C enrollments with a payment plan are additionally gated on payment status —
-    see trainer_payment_gate(). An enrollment whose first payment hasn't been
-    recorded yet is left out entirely; one that's fallen behind on a later
-    installment stays listed (name still visible) but with its schedule blanked out
-    and `payment_blocked: true` so the frontend hides it from the weekly grid,
-    today's classes, and the attendance-marking picker.
+    Excludes an archived student's non-completed enrollments — this is the
+    single shared source for My Students, the trainer dashboard's weekly
+    schedule/"Batches completed" count, and the attendance-marking picker, so
+    filtering here removes an archived student from all three at once. A
+    student can only be archived once none of their enrollments are ongoing
+    (see StudentViewSet.archive), so in practice this only ever hides an
+    already-withdrawn batch. A *completed* batch deliberately stays visible
+    even after the student is archived — that's the trainer's own history of
+    having taught it, and archiving is routine roster housekeeping on the
+    admin side that shouldn't retroactively erase it.
     """
 
     serializer_class = EnrollmentSerializer
@@ -335,7 +333,7 @@ class MyStudentsView(ListAPIView):
             Enrollment.objects.select_related('student', 'course', 'trainer', 'payment_plan')
             .prefetch_related('payment_plan__installments')
             .filter(Q(trainer=self.request.user.trainer) | Q(id__in=substitute_enrollment_ids))
-            .exclude(student__status='archived')
+            .exclude(Q(student__status='archived') & ~Q(status='completed'))
             .order_by('-start_date')
         )
 

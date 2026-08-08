@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
+import { ActiveStudentsModal } from '../../components/ActiveStudentsModal'
 import { ArchiveTrainerModal } from '../../components/ArchiveTrainerModal'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
@@ -74,6 +75,8 @@ export default function TrainerDetailPage() {
   const [showArchiveModal, setShowArchiveModal] = useState(false)
   const [unarchiving, setUnarchiving] = useState(false)
   const [unarchiveError, setUnarchiveError] = useState('')
+
+  const [showActiveStudents, setShowActiveStudents] = useState(false)
 
   const loadTrainer = useCallback(async () => {
     setTrainer(await api(`/api/trainers/${id}/`))
@@ -272,6 +275,8 @@ export default function TrainerDetailPage() {
     .filter((a) => a.date >= lastCycleStart)
     .sort((a, b) => b.date.localeCompare(a.date))
 
+  const ongoingEnrollments = enrollments.filter((e) => e.status === 'ongoing')
+
   const approvedRequestsCount = attendanceRequests.filter((r) => r.status === 'approved').length
   // Deliberately excludes the live, still-open current cycle — that amount isn't due
   // yet (a cycle has to close before it becomes an actual Payout that can be marked paid).
@@ -341,7 +346,18 @@ export default function TrainerDetailPage() {
           </div>
           <div>
             <dt className="text-text-secondary">Active students</dt>
-            <dd>{enrollments.filter((e) => e.status === 'ongoing').length}</dd>
+            <dd className="flex items-center gap-2">
+              <span>{ongoingEnrollments.length}</span>
+              {ongoingEnrollments.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowActiveStudents(true)}
+                  className="text-xs font-medium text-primary hover:underline focus-ring"
+                >
+                  Details
+                </button>
+              )}
+            </dd>
           </div>
           <div>
             <dt className="text-text-secondary">Late requests approved</dt>
@@ -669,6 +685,20 @@ export default function TrainerDetailPage() {
         trainerName={trainer.name}
         onClose={() => setShowArchiveModal(false)}
         onArchived={loadTrainer}
+      />
+
+      <ActiveStudentsModal
+        open={showActiveStudents}
+        onClose={() => setShowActiveStudents(false)}
+        title={`${trainer.name} — active students`}
+        rows={ongoingEnrollments.map((e) => ({
+          id: e.id,
+          studentId: e.student,
+          studentName: e.student_name,
+          courseName: e.course_name,
+          classesCompleted: e.classes_completed,
+          classesTotal: e.classes_total,
+        }))}
       />
     </div>
   )

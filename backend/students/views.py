@@ -197,9 +197,11 @@ class StudentViewSet(ModelViewSet):
 
         user = request.user
         if not user.is_staff:
-            # Mirrors MyStudentsView's exclude(student__status='archived') — a trainer
-            # shouldn't be able to reach an archived student's profile directly
-            # (e.g. a stale bookmark) any more than they can find them listed.
+            # Unlike MyStudentsView (which still lists an archived student's
+            # completed batches — see its docstring), the profile page itself
+            # stays fully blocked for an archived student: nothing links to it
+            # from that completed-batches row (plain text, not a link), so
+            # there's no legitimate path here besides a stale bookmark/URL.
             if student.status == 'archived':
                 return Response({'detail': 'Not found.'}, status=404)
             today = timezone.localdate()
