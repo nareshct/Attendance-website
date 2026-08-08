@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from rest_framework import filters, status
+from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
@@ -99,6 +100,7 @@ class TrainerViewSet(ModelViewSet):
         # trainer loses access right away, not just on their next login attempt.
         trainer.user.is_active = False
         trainer.user.save(update_fields=['is_active'])
+        log_action(request.user, 'trainer_archive', trainer.name)
         return Response(TrainerSerializer(trainer).data)
 
     @action(detail=True, methods=['post'])
@@ -108,6 +110,7 @@ class TrainerViewSet(ModelViewSet):
         trainer.save(update_fields=['status'])
         trainer.user.is_active = True
         trainer.user.save(update_fields=['is_active'])
+        log_action(request.user, 'trainer_unarchive', trainer.name)
         return Response(TrainerSerializer(trainer).data)
 
     @action(detail=True, methods=['post'], url_path='reset-password')
@@ -124,6 +127,12 @@ class TrainerViewSet(ModelViewSet):
 
         trainer.user.set_password(new_password)
         trainer.user.save(update_fields=['password'])
+        # Kill any session the trainer is currently logged in with — an admin-triggered
+        # reset (e.g. after a leaked password) should cut off existing access immediately,
+        # not just block the old password going forward. They'll get a fresh token on
+        # their next login (Token.objects.get_or_create in LoginView).
+        Token.objects.filter(user=trainer.user).delete()
+        log_action(request.user, 'trainer_reset_password', trainer.name)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['get'], url_path='current-cycle')

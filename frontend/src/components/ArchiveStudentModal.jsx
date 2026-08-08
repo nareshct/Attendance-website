@@ -129,6 +129,7 @@ export function ArchiveStudentModal({ open, studentId, studentName, sourceType, 
                           <input
                             type="number"
                             step="0.01"
+                            min="0"
                             placeholder="Refund amount (₹, optional)"
                             value={form.refund_amount}
                             onChange={(ev) => updateRefundForm(e.id, 'refund_amount', ev.target.value)}

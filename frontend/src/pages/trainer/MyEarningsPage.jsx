@@ -18,12 +18,12 @@ export default function MyEarningsPage() {
   const [current, setCurrent] = useState(null)
   const [attendance, setAttendance] = useState([])
   const [showLastCycleClasses, setShowLastCycleClasses] = useState(false)
+  const [loadingLastCycleClasses, setLoadingLastCycleClasses] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     api('/api/my-earnings/').then(setPayouts).catch((err) => setError(err.message))
     api('/api/my-earnings/current/').then(setCurrent).catch((err) => setError(err.message))
-    api('/api/attendance/').then(setAttendance).catch((err) => setError(err.message))
   }, [api])
 
   // "Last cycle" always means the most recent formally-closed cycle — so this keeps
@@ -32,6 +32,25 @@ export default function MyEarningsPage() {
   // below): a just-settled current cycle isn't "last cycle," it's still this one.
   const history = payouts.filter((p) => !current || p.cycle_start !== current.cycle_start || p.cycle_end !== current.cycle_end)
   const lastCycle = history[0]
+
+  // Fetched on demand, bounded to just this one cycle's date range, rather than
+  // eagerly pulling a trainer's entire attendance history up front — that used to
+  // break outright once a trainer's lifetime total passed the API's page size (see
+  // api/client.js's unwrapPaginated).
+  async function toggleLastCycleClasses() {
+    const opening = !showLastCycleClasses
+    setShowLastCycleClasses(opening)
+    if (!opening || !lastCycle) return
+    setLoadingLastCycleClasses(true)
+    setError('')
+    try {
+      setAttendance(await api(`/api/attendance/?start=${lastCycle.cycle_start}&end=${lastCycle.cycle_end}`))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoadingLastCycleClasses(false)
+    }
+  }
 
   // Normally a cycle is either the live "still open" row or a real Payout row, never
   // both — Payout rows only exist for cycles that have formally closed. But an admin
@@ -118,7 +137,7 @@ export default function MyEarningsPage() {
         <button
           type="button"
           disabled={!lastCycle}
-          onClick={() => setShowLastCycleClasses((v) => !v)}
+          onClick={toggleLastCycleClasses}
           className="text-left disabled:cursor-default rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
         >
           <Card className={lastCycle ? 'hover:border-primary-tint-border hover:shadow-sm transition-[box-shadow,border-color] duration-150 ease-out cursor-pointer' : ''}>
@@ -149,7 +168,7 @@ export default function MyEarningsPage() {
                 </tr>
               </thead>
               <tbody>
-                {lastCycleClasses.map((a) => (
+                {!loadingLastCycleClasses && lastCycleClasses.map((a) => (
                   <tr key={a.id} className="table-row">
                     <td className="table-cell">{formatDate(a.date)}</td>
                     <td className="table-cell">{a.student_name}</td>
@@ -157,7 +176,10 @@ export default function MyEarningsPage() {
                     <td className="table-cell text-text-secondary">{a.topic_covered || '—'}</td>
                   </tr>
                 ))}
-                {lastCycleClasses.length === 0 && (
+                {loadingLastCycleClasses && (
+                  <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
+                )}
+                {!loadingLastCycleClasses && lastCycleClasses.length === 0 && (
                   <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">No classes found for this cycle.</td></tr>
                 )}
               </tbody>

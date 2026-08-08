@@ -61,7 +61,7 @@ export default function BatchesPage() {
   }, [api])
 
   useEffect(() => {
-    loadSummary().catch(() => {})
+    loadSummary().catch((err) => setError(err.message))
     api('/api/courses/').then(setCourses).catch(() => {})
     // Only used as autocomplete suggestions below — a batch trainer isn't required to be
     // a registered trainer, so this list doesn't restrict what can be typed/added.
@@ -194,7 +194,7 @@ export default function BatchesPage() {
             options={courses.map((c) => ({ value: c.id, label: c.name }))}
           />
           <input required type="number" min="1" placeholder="Total classes" value={form.total_classes} onChange={(e) => setForm({ ...form, total_classes: e.target.value })} className="input" />
-          <input required type="number" step="0.01" placeholder="Fee per student (₹)" value={form.fee_per_student} onChange={(e) => setForm({ ...form, fee_per_student: e.target.value })} className="input" />
+          <input required type="number" step="0.01" min="0" placeholder="Fee per student (₹)" value={form.fee_per_student} onChange={(e) => setForm({ ...form, fee_per_student: e.target.value })} className="input" />
           <select value={form.payment_type} onChange={(e) => setForm({ ...form, payment_type: e.target.value })} className="input">
             {PAYMENT_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>

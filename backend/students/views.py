@@ -1,4 +1,5 @@
 import re
+import uuid
 
 from django.conf import settings
 from django.db.models import Q
@@ -145,6 +146,7 @@ class StudentViewSet(ModelViewSet):
             )
         student.status = 'archived'
         student.save(update_fields=['status'])
+        log_action(request.user, 'student_archive', student.name)
         return Response(StudentSerializer(student).data)
 
     @action(detail=True, methods=['post'])
@@ -152,6 +154,7 @@ class StudentViewSet(ModelViewSet):
         student = self.get_object()
         student.status = 'active'
         student.save(update_fields=['status'])
+        log_action(request.user, 'student_unarchive', student.name)
         return Response(StudentSerializer(student).data)
 
     @action(detail=True, methods=['get', 'post'])
@@ -168,10 +171,19 @@ class StudentViewSet(ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def regenerate_parent_link(self, request, pk=None):
-        """Swap in a fresh token, invalidating any link already sent out."""
+        """Swap in a fresh token, invalidating any link already sent out.
+
+        Updates the existing row in place rather than delete-then-create — `student`
+        is a OneToOneField, so two near-simultaneous regenerate clicks racing a
+        delete+create would have one of them hit the unique constraint and 500
+        instead of cleanly regenerating. A single UPDATE (or INSERT via
+        get_or_create if none exists yet) has no such race.
+        """
         student = self.get_object()
-        ParentShareLink.objects.filter(student=student).delete()
-        link = ParentShareLink.objects.create(student=student)
+        link, _ = ParentShareLink.objects.get_or_create(student=student)
+        link.token = uuid.uuid4()
+        link.revoked = False
+        link.save(update_fields=['token', 'revoked'])
         log_action(request.user, 'parent_link_regenerate', student.name)
         return Response(_parent_link_payload(link))
 

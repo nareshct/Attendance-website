@@ -162,6 +162,23 @@ class ClosedCycleSnapshotTests(TestCase):
         result = cycle_revenue_totals(open_cycle)
         self.assertEqual(result['b2b_revenue'], Decimal('700.00'), 'the open cycle should reflect the live current rate')
 
+    def test_open_cycle_still_counts_an_archived_clients_revenue(self):
+        # Same "money vanishes for archived clients" bug already fixed once in
+        # ClientViewSet.summary() — cycle_revenue_totals()'s open-cycle path must
+        # match its own closed-cycle path (Client.objects.all(), no status filter).
+        today = datetime.date.today()
+        start, end = cycle_bounds_for_date(today)
+        open_cycle = BillingCycle.objects.create(cycle_start=start, cycle_end=end, status='open')
+        Attendance.objects.create(
+            enrollment=self.enrollment, date=today, status='present', topic_covered='x', marked_by=self.trainer,
+        )
+        self.client_obj.status = 'archived'
+        self.client_obj.save()
+
+        result = cycle_revenue_totals(open_cycle)
+        self.assertEqual(result['b2b_classes'], 1)
+        self.assertEqual(result['b2b_revenue'], Decimal('200.00'))
+
 
 class B2CTotalsTests(TestCase):
     def test_b2c_revenue_uses_course_flat_rate(self):

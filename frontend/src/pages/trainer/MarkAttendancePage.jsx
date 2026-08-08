@@ -57,7 +57,12 @@ export default function MarkAttendancePage() {
   const [deleting, setDeleting] = useState(false)
 
   const loadHistory = useCallback(async () => {
-    setHistory(await api('/api/attendance/'))
+    // Bounded to the current + last billing cycle — this page only ever shows that
+    // window anyway (see visibleHistory below). Fetching a trainer's entire history
+    // unbounded broke outright once their lifetime total passed the API's page size
+    // (see api/client.js's unwrapPaginated) — this can never grow past ~2 cycles' worth.
+    const start = lastCycleBoundsFor(new Date()).start
+    setHistory(await api(`/api/attendance/?start=${start}`))
   }, [api])
 
   const lastCycleStart = lastCycleBoundsFor(new Date()).start
@@ -78,8 +83,8 @@ export default function MarkAttendancePage() {
 
   useEffect(() => {
     api('/api/my-students/').then((e) => setEnrollments(e.filter((x) => x.status === 'ongoing' && !x.payment_blocked))).catch((err) => setError(err.message))
-    loadHistory().catch(() => {})
-    loadRequests().catch(() => {})
+    loadHistory().catch((err) => setError(err.message))
+    loadRequests().catch((err) => setError(err.message))
   }, [api, loadHistory, loadRequests])
 
   async function handleSubmit(e) {

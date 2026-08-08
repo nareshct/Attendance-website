@@ -19,6 +19,12 @@ changes needed.
    (`rootDir: backend`, free plan, build runs `collectstatic` + `migrate`, start runs
    `gunicorn`).
 3. In the service's Environment tab, set:
+   - `SECRET_KEY` — a long random string (the app refuses to start without one once
+     `DEBUG=False`, rather than silently falling back to an insecure default)
+   - `DEBUG` — leave unset, or set to `False` explicitly. Defaults to `False` if unset,
+     but set it anyway so it's obvious from the dashboard that debug mode is off —
+     `DEBUG=True` in production leaks tracebacks and settings (including this same
+     `SECRET_KEY`/`DATABASE_URL`) to anyone who triggers a 500
    - `DATABASE_URL` — the Neon connection string from step 1
    - `ALLOWED_HOSTS` — your Render URL's host, e.g. `attendance-backend.onrender.com`
      (add your custom API domain here too once you have one, comma-separated)

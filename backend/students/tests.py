@@ -4,11 +4,12 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
+from audit.models import AuditLog
 from courses.models import Course
 from enrollments.models import Enrollment, PaymentInstallment, PaymentPlan
 from trainers.models import Trainer
 
-from .models import Student
+from .models import ParentShareLink, Student
 from .views import StudentViewSet
 
 
@@ -152,6 +153,20 @@ class StudentArchiveHardBlockTests(APITestCase):
         student.refresh_from_db()
         self.assertEqual(student.status, 'archived')
 
+    def test_archive_and_unarchive_are_written_to_the_audit_log(self):
+        admin = get_user_model().objects.create_user(username='admin_student_archive_audit', password='x', is_staff=True)
+        student = Student.objects.create(name='Audited Student', grade='5', source_type='B2C')
+
+        self._archive(student, admin)
+        factory = APIRequestFactory()
+        request = factory.post(f'/api/students/{student.id}/unarchive/')
+        force_authenticate(request, user=admin)
+        StudentViewSet.as_view({'post': 'unarchive'})(request, pk=student.id)
+
+        actions = list(AuditLog.objects.values_list('action', flat=True))
+        self.assertIn('student_archive', actions)
+        self.assertIn('student_unarchive', actions)
+
 
 class StudentProfileHiddenFromTrainerWhenArchivedTests(APITestCase):
     """A trainer shouldn't be able to reach an archived student's profile
@@ -185,3 +200,44 @@ class StudentProfileHiddenFromTrainerWhenArchivedTests(APITestCase):
         response = StudentViewSet.as_view({'get': 'profile'})(request, pk=student.id)
 
         self.assertEqual(response.status_code, 200)
+
+
+class RegenerateParentLinkTests(APITestCase):
+    """regenerate_parent_link previously did a separate delete() then create() —
+    since `student` is a OneToOneField, two near-simultaneous regenerate clicks
+    racing that could 500 on the unique constraint instead of cleanly
+    regenerating. Now updates the existing row in place (or creates one if
+    none exists) as a single operation. See StudentViewSet.regenerate_parent_link.
+    """
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_regen_link', password='x', is_staff=True)
+        self.factory = APIRequestFactory()
+
+    def _regenerate(self, student_id):
+        request = self.factory.post(f'/api/students/{student_id}/regenerate_parent_link/')
+        force_authenticate(request, user=self.admin)
+        return StudentViewSet.as_view({'post': 'regenerate_parent_link'})(request, pk=student_id)
+
+    def test_creates_a_link_when_none_exists_yet(self):
+        student = Student.objects.create(name='No Link Yet', grade='5', source_type='B2C')
+        response = self._regenerate(student.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(ParentShareLink.objects.filter(student=student).count(), 1)
+
+    def test_regenerating_changes_the_token_without_creating_a_second_row(self):
+        student = Student.objects.create(name='Has Link', grade='5', source_type='B2C')
+        original = ParentShareLink.objects.create(student=student)
+        response = self._regenerate(student.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(ParentShareLink.objects.filter(student=student).count(), 1)
+        link = ParentShareLink.objects.get(student=student)
+        self.assertEqual(link.pk, original.pk)
+        self.assertNotEqual(str(link.token), str(original.token))
+
+    def test_regenerating_a_revoked_link_makes_it_usable_again(self):
+        student = Student.objects.create(name='Revoked Link', grade='5', source_type='B2C')
+        ParentShareLink.objects.create(student=student, revoked=True)
+        response = self._regenerate(student.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(response.data['revoked'])

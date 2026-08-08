@@ -120,9 +120,9 @@ export default function BatchDetailPage() {
 
   useEffect(() => {
     loadBatch().catch((err) => setError(err.message))
-    loadRevenue().catch(() => {})
-    loadSessions().catch(() => {})
-    loadPayouts().catch(() => {})
+    loadRevenue().catch((err) => setError(err.message))
+    loadSessions().catch((err) => setError(err.message))
+    loadPayouts().catch((err) => setError(err.message))
     api('/api/students/').then((s) => setStudents(s.filter((x) => x.status === 'active'))).catch(() => {})
     api('/api/courses/').then(setCourses).catch(() => {})
     // Only used as autocomplete suggestions below — a batch trainer isn't required to be
@@ -652,6 +652,7 @@ export default function BatchDetailPage() {
               required
               type="number"
               step="0.01"
+              min="0"
               placeholder="Fee per student (₹)"
               value={batchForm.fee_per_student}
               onChange={(e) => setBatchForm({ ...batchForm, fee_per_student: e.target.value })}
@@ -823,6 +824,7 @@ export default function BatchDetailPage() {
             required
             type="number"
             step="0.01"
+            min="0"
             placeholder="Amount (₹)"
             value={payoutForm.amount}
             onChange={(e) => setPayoutForm({ ...payoutForm, amount: e.target.value })}
@@ -1180,6 +1182,7 @@ export default function BatchDetailPage() {
                         <input
                           type="number"
                           step="0.01"
+                          min="0"
                           autoFocus
                           value={editingInstallmentAmount}
                           onChange={(ev) => setEditingInstallmentAmount(ev.target.value)}
@@ -1265,6 +1268,7 @@ export default function BatchDetailPage() {
             <input
               type="number"
               step="0.01"
+              min="0"
               placeholder="Refund amount (₹, optional)"
               value={refundForm.refund_amount}
               onChange={(e) => setRefundForm({ ...refundForm, refund_amount: e.target.value })}

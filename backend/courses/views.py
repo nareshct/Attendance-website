@@ -46,6 +46,33 @@ class CourseMaterialViewSet(ModelViewSet):
         course_id = self.request.query_params.get('course')
         if course_id:
             qs = qs.filter(course_id=course_id)
+
+        # Unlike CourseViewSet (course *names* aren't sensitive, so that stays
+        # unscoped for the filter dropdown — see its get_permissions comment),
+        # materials are real teaching content, so a trainer only gets courses
+        # they actually have some current tie to: their own 1:1 enrollments,
+        # batches they're on (trainer_names is free text, not a relation — see
+        # batch_ids_for_trainer), or a course they're currently substitute-covering.
+        user = self.request.user
+        if not user.is_staff:
+            from django.utils import timezone
+
+            from batches.models import Batch
+            from batches.services import batch_ids_for_trainer
+            from enrollments.models import Enrollment, SubstituteAssignment
+
+            trainer = user.trainer
+            today = timezone.localdate()
+            allowed_course_ids = set(
+                Enrollment.objects.filter(trainer=trainer).values_list('course_id', flat=True)
+            ) | set(
+                SubstituteAssignment.objects.filter(
+                    substitute_trainer=trainer, start_date__lte=today, end_date__gte=today,
+                ).values_list('enrollment__course_id', flat=True)
+            ) | set(
+                Batch.objects.filter(id__in=batch_ids_for_trainer(trainer.name)).values_list('course_id', flat=True)
+            )
+            qs = qs.filter(course_id__in=allowed_course_ids)
         return qs
 
     @action(detail=True, methods=['get'])

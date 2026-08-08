@@ -74,7 +74,14 @@ class ChangePasswordView(APIView):
 
         request.user.set_password(new_password)
         request.user.save(update_fields=['password'])
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        # Rotate the auth token rather than just deleting it — the request making this
+        # call is itself authenticated with the old token, so a bare delete would lock
+        # the user out of their own change-password request's session immediately. The
+        # new token is handed back so the frontend can swap it in place, while any OTHER
+        # copy of the old token (a stale/leaked session) stops working right away.
+        Token.objects.filter(user=request.user).delete()
+        token = Token.objects.create(user=request.user)
+        return Response({'token': token.key})
 
 
 class MeView(APIView):
@@ -197,6 +204,12 @@ class PasswordResetConfirmView(APIView):
 
         user.set_password(new_password)
         user.save(update_fields=['password'])
+        # Invalidate any session that was active before this reset — the whole point of
+        # "forgot password" is often that access needs cutting off, not just that the
+        # user forgot the old value. The user is anonymous at this point (this is the
+        # emailed-link flow, not a logged-in change), so unlike ChangePasswordView there's
+        # no "current request's own token" to preserve — they'll get a fresh one on login.
+        Token.objects.filter(user=user).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

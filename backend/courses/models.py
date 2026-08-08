@@ -1,5 +1,17 @@
+from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MinValueValidator
 from django.db import models
+
+# Django has no built-in file-size validator (unlike MinValueValidator for numbers) —
+# without this, CourseMaterialViewSet's upload had no server-side limit at all, only
+# whatever the browser/network happened to tolerate, so a trainer or admin could
+# upload something huge enough to fill disk/storage.
+MAX_COURSE_MATERIAL_SIZE = 20 * 1024 * 1024
+
+
+def validate_course_material_size(file):
+    if file.size > MAX_COURSE_MATERIAL_SIZE:
+        raise ValidationError(f'File must be under {MAX_COURSE_MATERIAL_SIZE // (1024 * 1024)}MB.')
 
 
 class Course(models.Model):
@@ -27,7 +39,7 @@ class CourseMaterial(models.Model):
     description = models.TextField(blank=True)
     file = models.FileField(
         upload_to='course_materials/%Y/%m/',
-        validators=[FileExtensionValidator(allowed_extensions=['pdf'])],
+        validators=[FileExtensionValidator(allowed_extensions=['pdf']), validate_course_material_size],
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
 

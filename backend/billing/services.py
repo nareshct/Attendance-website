@@ -594,7 +594,12 @@ def cycle_revenue_totals(cycle):
         b2b_classes = 0
         b2b_revenue = Decimal('0.00')
         b2b_trainer_cost = Decimal('0.00')
-        for client in Client.objects.filter(status='active'):
+        # Every client, not just active ones — same reasoning as ClientViewSet.summary()
+        # and snapshot_cycle_revenue()'s own Client.objects.all() below: an archived
+        # client's classes taught this cycle are still real revenue/cost, and this
+        # figure would otherwise silently jump the moment the cycle closes (snapshot
+        # never filtered by status) purely because of an unrelated archive action.
+        for client in Client.objects.all():
             totals = client_current_cycle_totals(client, cycle=cycle)
             b2b_classes += totals['total_classes']
             b2b_revenue += totals['total_revenue']

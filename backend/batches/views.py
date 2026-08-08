@@ -2,6 +2,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from django.db import IntegrityError
 from django.http import HttpResponse
 from rest_framework import filters, status
 from rest_framework.decorators import action
@@ -91,12 +92,22 @@ class BatchViewSet(ModelViewSet):
         response['Content-Disposition'] = 'attachment; filename="batch_import_template.xlsx"'
         return response
 
+    # Unlike CourseMaterial.file (a model FileField with a validate_course_material_size
+    # validator), this is a plain request.FILES lookup with no model behind it to attach
+    # a validator to — enforce the same kind of cap here directly.
+    MAX_IMPORT_FILE_SIZE = 5 * 1024 * 1024
+
     @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
     def import_students(self, request, pk=None):
         batch = self.get_object()
         file_obj = request.FILES.get('file')
         if not file_obj:
             return Response({'detail': 'Attach an Excel (.xlsx) file as "file".'}, status=status.HTTP_400_BAD_REQUEST)
+        if file_obj.size > self.MAX_IMPORT_FILE_SIZE:
+            return Response(
+                {'detail': f'File must be under {self.MAX_IMPORT_FILE_SIZE // (1024 * 1024)}MB.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             summary = import_students_from_excel(batch, file_obj)
         except ValueError as exc:
@@ -257,7 +268,19 @@ class BatchEnrollmentViewSet(ModelViewSet):
             'joined_date': date.today().isoformat(),
         })
         serializer.is_valid(raise_exception=True)
-        enrollment = serializer.save(joined_date=date.today())
+        # The checks above are dedupe hints, not a lock — two near-simultaneous
+        # submissions for the same student/guest can both pass them and then race on
+        # the actual insert. unique_together('batch','student') and the guest
+        # UniqueConstraint (see BatchEnrollment.Meta) are the real backstop; catch the
+        # resulting IntegrityError here and turn it into the same clean 400 instead of
+        # an unhandled 500.
+        try:
+            enrollment = serializer.save(joined_date=date.today())
+        except IntegrityError:
+            return Response(
+                {'detail': f'{guest_name or "This student"} is already enrolled in this batch.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         create_batch_installments(enrollment)
         log_action(request.user, 'batch_enroll', f'{enrollment.display_name} — {batch.name}', f'₹{batch.fee_per_student}')
         return Response(BatchEnrollmentSerializer(enrollment).data, status=status.HTTP_201_CREATED)
@@ -342,6 +365,13 @@ class BatchInstallmentViewSet(ModelViewSet):
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
         installment = self.get_object()
+        # Without this guard, a cancelled installment (auto-cancelled by
+        # BatchEnrollmentViewSet.withdraw when the student left) could be resurrected
+        # as "paid" — e.g. from a stale browser tab — inflating batch_revenue_summary's
+        # collected total with money that was never actually received. Mirrors
+        # BatchPayoutViewSet.mark_paid's identical check.
+        if installment.paid_status != 'pending':
+            return Response({'detail': f'Installment is already {installment.paid_status}.'}, status=status.HTTP_400_BAD_REQUEST)
         installment.paid_status = 'paid'
         installment.paid_date = date.today()
         installment.save(update_fields=['paid_status', 'paid_date'])
@@ -356,6 +386,8 @@ class BatchInstallmentViewSet(ModelViewSet):
     @action(detail=True, methods=['post'])
     def revoke(self, request, pk=None):
         installment = self.get_object()
+        if installment.paid_status != 'paid':
+            return Response({'detail': f'Installment is not currently paid (status: {installment.paid_status}).'}, status=status.HTTP_400_BAD_REQUEST)
         installment.paid_status = 'pending'
         installment.paid_date = None
         installment.save(update_fields=['paid_status', 'paid_date'])

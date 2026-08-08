@@ -4,7 +4,7 @@ import { Card } from '../components/Card'
 import { useAuth } from '../hooks/useAuth'
 
 export default function ChangePasswordPage() {
-  const { auth } = useAuth()
+  const { auth, updateToken } = useAuth()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -18,7 +18,7 @@ export default function ChangePasswordPage() {
   const [savingEmail, setSavingEmail] = useState(false)
 
   useEffect(() => {
-    getMe(auth.token).then((data) => setEmail(data.email)).catch(() => {})
+    getMe(auth.token).then((data) => setEmail(data.email)).catch((err) => setEmailError(err.message))
   }, [auth.token])
 
   async function handleSaveEmail(e) {
@@ -49,7 +49,8 @@ export default function ChangePasswordPage() {
 
     setSubmitting(true)
     try {
-      await changePassword(auth.token, currentPassword, newPassword)
+      const result = await changePassword(auth.token, currentPassword, newPassword)
+      updateToken(result.token)
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')

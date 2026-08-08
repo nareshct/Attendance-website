@@ -92,12 +92,12 @@ export default function TrainerDetailPage() {
 
   useEffect(() => {
     loadTrainer().catch((err) => setError(err.message))
-    api(`/api/payouts/?trainer=${id}`).then(setPayouts).catch(() => {})
+    api(`/api/payouts/?trainer=${id}`).then(setPayouts).catch((err) => setError(err.message))
     api('/api/courses/').then(setCourses).catch(() => {})
-    api(`/api/enrollments/?trainer=${id}`).then(setEnrollments).catch(() => {})
-    api(`/api/attendance-requests/?trainer=${id}`).then(setAttendanceRequests).catch(() => {})
-    loadCurrentCycle().catch(() => {})
-    loadAttendance().catch(() => {})
+    api(`/api/enrollments/?trainer=${id}`).then(setEnrollments).catch((err) => setError(err.message))
+    api(`/api/attendance-requests/?trainer=${id}`).then(setAttendanceRequests).catch((err) => setError(err.message))
+    loadCurrentCycle().catch((err) => setError(err.message))
+    loadAttendance().catch((err) => setError(err.message))
   }, [api, id, loadTrainer, loadCurrentCycle, loadAttendance])
 
   function openDeleteAttendance(attendanceId) {
@@ -442,6 +442,7 @@ export default function TrainerDetailPage() {
               required
               type="number"
               step="0.01"
+              min="0"
               value={profileForm?.default_rate_per_class ?? ''}
               onChange={(e) => setProfileForm({ ...profileForm, default_rate_per_class: e.target.value })}
               className="input"
@@ -479,7 +480,7 @@ export default function TrainerDetailPage() {
                 <option value="">Select course…</option>
                 {availableCourses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <input required type="number" step="0.01" placeholder="Rate per class (₹)" value={rateForm.rate_per_class} onChange={(e) => setRateForm({ ...rateForm, rate_per_class: e.target.value })} className="input" />
+              <input required type="number" step="0.01" min="0" placeholder="Rate per class (₹)" value={rateForm.rate_per_class} onChange={(e) => setRateForm({ ...rateForm, rate_per_class: e.target.value })} className="input" />
               <Button disabled={submitting} type="submit" variant="success">
                 {submitting ? 'Saving…' : 'Save rate'}
               </Button>
@@ -526,6 +527,7 @@ export default function TrainerDetailPage() {
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 autoFocus
                 value={editingRateAmount}
                 onChange={(e) => setEditingRateAmount(e.target.value)}

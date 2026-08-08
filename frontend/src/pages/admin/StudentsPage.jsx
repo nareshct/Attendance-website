@@ -120,8 +120,13 @@ export default function StudentsPage() {
   const [archiveTarget, setArchiveTarget] = useState(null)
 
   async function handleUnarchive(id) {
-    await api(`/api/students/${id}/unarchive/`, { method: 'POST' })
-    await reload()
+    setError('')
+    try {
+      await api(`/api/students/${id}/unarchive/`, { method: 'POST' })
+      await reload()
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   return (

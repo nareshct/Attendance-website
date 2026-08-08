@@ -438,7 +438,16 @@ export default function EnrollmentsPage() {
               required
               placeholder="Search course…"
               value={form.course}
-              onChange={(v) => setForm({ ...form, course: v })}
+              onChange={(v) => {
+                // Default the batch count to this course's standard length — nothing
+                // tied these together before, so "Batch count" silently stayed at
+                // EMPTY_FORM's hardcoded 24 regardless of which course was picked,
+                // which also fed the B2C total-price preview below with the wrong
+                // class count for any course whose real length isn't 24. Still
+                // editable afterward for a genuinely partial/extended batch.
+                const course = courses.find((c) => String(c.id) === v)
+                setForm({ ...form, course: v, classes_total: course ? String(course.total_classes) : form.classes_total })
+              }}
               options={courses.map((c) => ({ value: c.id, label: c.name }))}
             />
             <SearchableSelect
@@ -693,6 +702,7 @@ export default function EnrollmentsPage() {
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 placeholder="Refund amount (₹, optional)"
                 value={withdrawRefundAmount}
                 onChange={(ev) => setWithdrawRefundAmount(ev.target.value)}

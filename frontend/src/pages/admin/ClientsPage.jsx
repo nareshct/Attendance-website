@@ -29,7 +29,7 @@ export default function ClientsPage() {
 
   useEffect(() => {
     loadClients().catch((err) => setError(err.message))
-    loadSummary().catch(() => {})
+    loadSummary().catch((err) => setError(err.message))
   }, [loadClients, loadSummary])
 
   async function handleSubmit(e) {
@@ -57,9 +57,14 @@ export default function ClientsPage() {
   }
 
   async function handleUnarchive(id) {
-    await api(`/api/clients/${id}/unarchive/`, { method: 'POST' })
-    await loadClients()
-    await loadSummary()
+    setError('')
+    try {
+      await api(`/api/clients/${id}/unarchive/`, { method: 'POST' })
+      await loadClients()
+      await loadSummary()
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   const filtered = clients.filter((c) => {
@@ -88,7 +93,7 @@ export default function ClientsPage() {
           <input required placeholder="Company name" value={form.company_name} onChange={(e) => setForm({ ...form, company_name: e.target.value })} className="input" />
           <input required placeholder="Contact phone" value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} className="input" />
           <input placeholder="Contact email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} className="input" />
-          <input required type="number" step="0.01" placeholder="Rate per class (₹)" value={form.rate_per_class} onChange={(e) => setForm({ ...form, rate_per_class: e.target.value })} className="input" />
+          <input required type="number" step="0.01" min="0" placeholder="Rate per class (₹)" value={form.rate_per_class} onChange={(e) => setForm({ ...form, rate_per_class: e.target.value })} className="input" />
           {error && <p className="sm:col-span-3 text-error text-xs">{error}</p>}
           <div className="sm:col-span-3 flex justify-end gap-3">
             <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>

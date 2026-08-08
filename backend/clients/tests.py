@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
 from attendance.models import Attendance
+from audit.models import AuditLog
 from billing.models import BillingCycle, ClientInvoice
 from courses.models import Course
 from enrollments.models import Enrollment
@@ -165,6 +166,20 @@ class ClientArchiveHardBlockTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         client_obj.refresh_from_db()
         self.assertEqual(client_obj.status, 'archived')
+
+    def test_archive_and_unarchive_are_written_to_the_audit_log(self):
+        admin = get_user_model().objects.create_user(username='admin_client_archive_audit', password='x', is_staff=True)
+        client_obj = Client.objects.create(company_name='Audited Co', contact_phone='123', rate_per_class=Decimal('200'))
+
+        self._archive(client_obj, admin)
+        factory = APIRequestFactory()
+        request = factory.post(f'/api/clients/{client_obj.id}/unarchive/')
+        force_authenticate(request, user=admin)
+        ClientViewSet.as_view({'post': 'unarchive'})(request, pk=client_obj.id)
+
+        actions = list(AuditLog.objects.values_list('action', flat=True))
+        self.assertIn('client_archive', actions)
+        self.assertIn('client_unarchive', actions)
 
 
 class ClientEarningsHistoryReopenedCycleTests(APITestCase):

@@ -17,6 +17,19 @@ def csv_response(filename):
     return response
 
 
+# A cell starting with =, +, -, or @ is executed as a formula by Excel/Sheets/LibreOffice
+# when the CSV is opened — topic_covered is free text a trainer types per class, so
+# nothing stops it from starting with one of those, whether by accident (e.g. "-5 min
+# review") or a deliberately crafted formula. Prefixing a leading apostrophe forces
+# spreadsheet apps to treat the cell as literal text instead of a formula, without
+# changing what a human reading the CSV sees.
+def csv_safe(value):
+    text = str(value)
+    if text and text[0] in ('=', '+', '-', '@'):
+        return f"'{text}"
+    return text
+
+
 class PayoutsReportView(APIView):
     """GET /api/reports/payouts/?trainer=&cycle= — CSV of payouts, optionally filtered."""
 
@@ -110,7 +123,7 @@ class ClientAttendanceReportView(APIView):
             writer.writerow([
                 a.enrollment.student.student_id, a.enrollment.student.name,
                 a.enrollment.course.name, a.enrollment.batch_number,
-                a.date, a.topic_covered,
+                a.date, csv_safe(a.topic_covered),
             ])
         return response
 
@@ -151,6 +164,6 @@ class AttendanceReportView(APIView):
             writer.writerow([
                 a.date, a.marked_by.trainer_id, a.marked_by.name,
                 a.enrollment.student.student_id, a.enrollment.student.name,
-                a.enrollment.course.name, a.enrollment.batch_number, a.topic_covered,
+                a.enrollment.course.name, a.enrollment.batch_number, csv_safe(a.topic_covered),
             ])
         return response

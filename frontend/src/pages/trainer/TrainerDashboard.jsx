@@ -36,11 +36,13 @@ export default function TrainerDashboard() {
     let cancelled = false
     async function load() {
       try {
-        const [students, earnings, current, allMarked, attendanceRequests] = await Promise.all([
+        const [students, earnings, current, todaysMarked, attendanceRequests] = await Promise.all([
           api('/api/my-students/'),
           api('/api/my-earnings/'),
           api('/api/my-earnings/current/'),
-          api('/api/attendance/'),
+          // Bounded to just today — was previously every attendance record this
+          // trainer has ever marked (see last_class_date below for why that broke).
+          api(`/api/attendance/?date=${today()}`),
           api('/api/attendance-requests/'),
         ])
         if (cancelled) return
@@ -54,28 +56,22 @@ export default function TrainerDashboard() {
             .sort((a, b) => (a.covering_until || '').localeCompare(b.covering_until || '')),
         )
 
-        // Last logged class per enrollment, from every attendance record this trainer
-        // has ever marked (also doubles as today's marks, below, so one fetch covers
-        // both) — flags an ongoing enrollment that's gone quiet after it actually got
+        // last_class_date comes pre-computed from MyStudentsView (a per-enrollment
+        // annotation, not a full attendance history fetch — see its get_queryset) —
+        // flags an ongoing enrollment that's gone quiet after it actually got
         // started (a brand-new enrollment with zero classes yet just hasn't started,
         // which is a different thing, so it's left out).
-        const lastClassByEnrollment = {}
-        allMarked.forEach((a) => {
-          if (!lastClassByEnrollment[a.enrollment] || a.date > lastClassByEnrollment[a.enrollment]) {
-            lastClassByEnrollment[a.enrollment] = a.date
-          }
-        })
         const now = new Date()
         setQuietStudents(
           ongoing
-            .filter((s) => lastClassByEnrollment[s.id])
-            .map((s) => ({ ...s, lastClassDate: lastClassByEnrollment[s.id], daysSince: daysBetween(lastClassByEnrollment[s.id], now) }))
+            .filter((s) => s.last_class_date)
+            .map((s) => ({ ...s, lastClassDate: s.last_class_date, daysSince: daysBetween(s.last_class_date, now) }))
             .filter((s) => s.daysSince >= NO_SESSION_ALERT_DAYS)
             .sort((a, b) => b.daysSince - a.daysSince),
         )
         const dayCode = todayDayCode()
         const scheduledToday = ongoing.filter((s) => (s.class_days || '').split(',').includes(dayCode))
-        const markedEnrollmentIds = new Set(allMarked.filter((a) => a.date === today()).map((a) => a.enrollment))
+        const markedEnrollmentIds = new Set(todaysMarked.map((a) => a.enrollment))
 
         setTodaysClasses(
           scheduledToday

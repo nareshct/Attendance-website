@@ -7,6 +7,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient, APIRequestFactory, APITestCase, force_authenticate
 
 from attendance.models import Attendance, AttendanceRequest
+from audit.models import AuditLog
 from batches.models import Batch, BatchPayout
 from billing.models import BillingCycle, Payout, PayoutAdjustment
 from billing.services import get_or_create_cycle
@@ -134,6 +135,47 @@ class TrainerArchiveLoginTests(APITestCase):
 
         response = client.get('/api/auth/me/')
         self.assertEqual(response.status_code, 401)
+
+    def test_archive_and_unarchive_are_written_to_the_audit_log(self):
+        self._archive()
+        self._unarchive()
+        actions = list(AuditLog.objects.values_list('action', flat=True))
+        self.assertIn('trainer_archive', actions)
+        self.assertIn('trainer_unarchive', actions)
+
+
+class TrainerResetPasswordTests(APITestCase):
+    """Admin-triggered password reset must also kill any session the trainer
+    is already logged in with — otherwise a leaked/compromised password stays
+    usable via the old token even after the password itself is changed. See
+    TrainerViewSet.reset_password.
+    """
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_reset_pw', password='x', is_staff=True)
+        self.user = get_user_model().objects.create_user(username='reset_me_trainer', password='oldpw12345')
+        self.trainer = Trainer.objects.create(
+            user=self.user, name='Reset Me', phone_number='0000000000', place='Here',
+            default_rate_per_class=Decimal('100'),
+        )
+        self.factory = APIRequestFactory()
+
+    def _reset(self, new_password):
+        request = self.factory.post(
+            f'/api/trainers/{self.trainer.id}/reset-password/', {'new_password': new_password}, format='json',
+        )
+        force_authenticate(request, user=self.admin)
+        return TrainerViewSet.as_view({'post': 'reset_password'})(request, pk=self.trainer.id)
+
+    def test_reset_deletes_the_trainers_existing_token(self):
+        token = Token.objects.create(user=self.user)
+        response = self._reset('BrandNewPass456!')
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Token.objects.filter(key=token.key).exists())
+
+    def test_reset_is_written_to_the_audit_log(self):
+        self._reset('BrandNewPass456!')
+        self.assertTrue(AuditLog.objects.filter(action='trainer_reset_password').exists())
 
 
 class TrainerArchiveBlockersTests(APITestCase):

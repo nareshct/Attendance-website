@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from courses.models import Course
@@ -65,7 +66,7 @@ class Batch(models.Model):
     trainer_names = models.CharField(max_length=1000, blank=True, default='')
     description = models.TextField(blank=True, default='')
     total_classes = models.IntegerField()
-    fee_per_student = models.DecimalField(max_digits=10, decimal_places=2)
+    fee_per_student = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPE_CHOICES, default='one_time')
     start_date = models.DateField()
     class_time = models.TimeField(null=True, blank=True)
@@ -121,6 +122,22 @@ class BatchEnrollment(models.Model):
     class Meta:
         unique_together = ('batch', 'student')
         ordering = ['-joined_date']
+        constraints = [
+            # A guest (student=None) has no FK for unique_together above to lean on, so
+            # the app-level dedup check in BatchEnrollmentViewSet.create() (case-
+            # insensitive name, digit-normalized phone) was the only guard — no DB backstop
+            # meant a double-click or a re-run import could race past that check and
+            # double-enroll (and double-bill) the same guest. This won't catch every
+            # variant the app-level check does (e.g. differently-formatted phone numbers),
+            # but it closes the exact-duplicate-submission race, which is the realistic
+            # concurrent case. Excludes a blank phone number so two different guests who
+            # share a common name with no phone on file aren't wrongly blocked.
+            models.UniqueConstraint(
+                fields=['batch', 'guest_name', 'guest_phone_number'],
+                condition=models.Q(student__isnull=True) & ~models.Q(guest_phone_number=''),
+                name='unique_guest_enrollment_per_batch',
+            ),
+        ]
 
     @property
     def display_name(self):
@@ -142,7 +159,7 @@ class BatchInstallment(models.Model):
     # None = due immediately at signup. Otherwise a resolved session-count milestone
     # (see PAYMENT_MILESTONES) — informational only, parents may pay earlier.
     due_at_sessions = models.IntegerField(null=True, blank=True)
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     paid_status = models.CharField(max_length=10, choices=PAID_STATUS_CHOICES, default='pending')
     paid_date = models.DateField(null=True, blank=True)
 
@@ -200,7 +217,7 @@ class BatchPayout(models.Model):
 
     batch = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='payouts')
     recipient_name = models.CharField(max_length=255)
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     paid_status = models.CharField(max_length=10, choices=PAID_STATUS_CHOICES, default='pending')
     paid_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

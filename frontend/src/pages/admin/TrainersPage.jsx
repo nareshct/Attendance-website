@@ -77,8 +77,13 @@ export default function TrainersPage() {
   const [archiveTarget, setArchiveTarget] = useState(null)
 
   async function handleUnarchive(id) {
-    await api(`/api/trainers/${id}/unarchive/`, { method: 'POST' })
-    await loadTrainers()
+    setError('')
+    try {
+      await api(`/api/trainers/${id}/unarchive/`, { method: 'POST' })
+      await loadTrainers()
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   return (
@@ -109,6 +114,7 @@ export default function TrainersPage() {
               placeholder="e.g. 100"
               type="number"
               step="0.01"
+              min="0"
               value={form.default_rate_per_class}
               onChange={(e) => setForm({ ...form, default_rate_per_class: e.target.value })}
               className="input max-w-xs"
@@ -131,6 +137,7 @@ export default function TrainersPage() {
                     placeholder="Rate per class (₹)"
                     type="number"
                     step="0.01"
+                    min="0"
                     value={r.rate_per_class}
                     onChange={(e) => updateRate(i, 'rate_per_class', e.target.value)}
                     className="input"

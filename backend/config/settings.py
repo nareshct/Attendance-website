@@ -25,7 +25,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=True, cast=bool)
+# Defaults to False (fail closed) — a deploy that forgets to set this env var gets a
+# safe production posture instead of DEBUG=True leaking tracebacks/settings (including
+# SECRET_KEY/DATABASE_URL) to the public internet on every unhandled 500. Local dev
+# needs DEBUG=True in backend/.env explicitly (see .env.example) — it's not free anymore.
+DEBUG = config('DEBUG', default=False, cast=bool)
 
 # SECURITY WARNING: keep the secret key used in production secret! No hardcoded
 # fallback here — a committed default would be a known-public secret the moment this

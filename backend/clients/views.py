@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from audit.services import log_action
 from billing.models import BillingCycle, ClientInvoice
 from billing.services import client_all_time_totals, client_current_cycle_totals, get_or_create_cycle
 from config.permissions import IsAdmin
@@ -110,6 +111,7 @@ class ClientViewSet(ModelViewSet):
             )
         client.status = 'archived'
         client.save(update_fields=['status'])
+        log_action(request.user, 'client_archive', client.company_name)
         return Response(ClientSerializer(client).data)
 
     @action(detail=True, methods=['post'])
@@ -117,6 +119,7 @@ class ClientViewSet(ModelViewSet):
         client = self.get_object()
         client.status = 'active'
         client.save(update_fields=['status'])
+        log_action(request.user, 'client_unarchive', client.company_name)
         return Response(ClientSerializer(client).data)
 
     @action(detail=True, methods=['get'])

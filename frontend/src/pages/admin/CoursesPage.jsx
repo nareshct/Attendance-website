@@ -88,8 +88,8 @@ export default function CoursesPage() {
       <Modal open={showForm} onClose={() => setShowForm(false)} title="Add course">
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input required placeholder="Course name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input" />
-          <input required type="number" placeholder="Total classes" value={form.total_classes} onChange={(e) => setForm({ ...form, total_classes: e.target.value })} className="input" />
-          <input type="number" step="0.01" placeholder="B2C rate per class (₹)" value={form.rate_per_class} onChange={(e) => setForm({ ...form, rate_per_class: e.target.value })} className="input" />
+          <input required type="number" min="1" placeholder="Total classes" value={form.total_classes} onChange={(e) => setForm({ ...form, total_classes: e.target.value })} className="input" />
+          <input type="number" step="0.01" min="0" placeholder="B2C rate per class (₹)" value={form.rate_per_class} onChange={(e) => setForm({ ...form, rate_per_class: e.target.value })} className="input" />
           {error && <p className="sm:col-span-2 text-error text-xs">{error}</p>}
           <div className="sm:col-span-2 flex justify-end gap-3">
             <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>
@@ -105,8 +105,8 @@ export default function CoursesPage() {
       <Modal open={editingCourseId != null} onClose={closeEditCourse} title="Edit course">
         <form onSubmit={handleEditSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input required placeholder="Course name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="input" />
-          <input required type="number" placeholder="Total classes" value={editForm.total_classes} onChange={(e) => setEditForm({ ...editForm, total_classes: e.target.value })} className="input" />
-          <input type="number" step="0.01" placeholder="B2C rate per class (₹)" value={editForm.rate_per_class} onChange={(e) => setEditForm({ ...editForm, rate_per_class: e.target.value })} className="input" />
+          <input required type="number" min="1" placeholder="Total classes" value={editForm.total_classes} onChange={(e) => setEditForm({ ...editForm, total_classes: e.target.value })} className="input" />
+          <input type="number" step="0.01" min="0" placeholder="B2C rate per class (₹)" value={editForm.rate_per_class} onChange={(e) => setEditForm({ ...editForm, rate_per_class: e.target.value })} className="input" />
           {editError && <p className="sm:col-span-2 text-error text-xs">{editError}</p>}
           <div className="sm:col-span-2 flex justify-end gap-3">
             <Button type="button" variant="ghost" onClick={closeEditCourse}>

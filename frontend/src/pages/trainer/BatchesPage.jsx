@@ -53,8 +53,8 @@ export default function TrainerBatchesPage() {
 
   useEffect(() => {
     batches.forEach((b) => {
-      api(`/api/batch-sessions/?batch=${b.id}`).then((s) => setSessionsByBatch((prev) => ({ ...prev, [b.id]: s }))).catch(() => {})
-      api(`/api/batch-payouts/?batch=${b.id}`).then((p) => setPayoutsByBatch((prev) => ({ ...prev, [b.id]: p }))).catch(() => {})
+      api(`/api/batch-sessions/?batch=${b.id}`).then((s) => setSessionsByBatch((prev) => ({ ...prev, [b.id]: s }))).catch((err) => setError(err.message))
+      api(`/api/batch-payouts/?batch=${b.id}`).then((p) => setPayoutsByBatch((prev) => ({ ...prev, [b.id]: p }))).catch((err) => setError(err.message))
     })
   }, [api, batches])
 

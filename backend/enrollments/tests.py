@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
+from attendance.models import Attendance
 from attendance.views import AttendanceViewSet
 from audit.models import AuditLog
 from clients.models import Client
@@ -626,6 +627,15 @@ class WithdrawActionTests(APITestCase):
         response = self._withdraw()
         self.assertEqual(response.status_code, 400)
 
+    def test_negative_refund_amount_is_rejected(self):
+        response = self._withdraw(refund_amount='-500')
+
+        self.assertEqual(response.status_code, 400)
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.status, 'ongoing')
+        self.plan.refresh_from_db()
+        self.assertEqual(self.plan.refunded_amount, Decimal('0.00'))
+
 
 class AssignSubstituteActionTests(APITestCase):
     def setUp(self):
@@ -743,3 +753,35 @@ class MyStudentsExcludesArchivedStudentsTests(APITestCase):
         response = self._list(trainer)
 
         self.assertEqual(len(response.data), 1)
+
+
+class MyStudentsLastClassDateTests(APITestCase):
+    """last_class_date is a per-enrollment annotation (most recent 'present'
+    Attendance date), not a full history fetch — powers the trainer
+    dashboard's "No recent class" alert without a separate, unbounded
+    /api/attendance/ call. See MyStudentsView.get_queryset().
+    """
+
+    def _list(self, trainer):
+        factory = APIRequestFactory()
+        request = factory.get('/api/my-students/')
+        force_authenticate(request, user=trainer.user)
+        return MyStudentsView.as_view()(request)
+
+    def test_reports_the_most_recent_present_date(self):
+        trainer = _make_trainer(username='trainer_last_class_date')
+        enrollment = _make_enrollment(trainer)
+        Attendance.objects.create(enrollment=enrollment, date=datetime.date(2026, 1, 5), status='present', marked_by=trainer)
+        Attendance.objects.create(enrollment=enrollment, date=datetime.date(2026, 1, 20), status='present', marked_by=trainer)
+
+        response = self._list(trainer)
+
+        self.assertEqual(response.data[0]['last_class_date'], datetime.date(2026, 1, 20))
+
+    def test_null_for_an_enrollment_with_no_attendance_yet(self):
+        trainer = _make_trainer(username='trainer_last_class_date_none')
+        _make_enrollment(trainer)
+
+        response = self._list(trainer)
+
+        self.assertIsNone(response.data[0]['last_class_date'])

@@ -1,11 +1,13 @@
+import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
-from .models import Course
+from .models import Course, CourseMaterial
 from .serializers import CourseSerializer
-from .views import CourseViewSet
+from .views import CourseMaterialViewSet, CourseViewSet
 
 
 class CourseHardDeleteBlockedTests(APITestCase):
@@ -77,3 +79,89 @@ class CourseRateValidationTests(APITestCase):
         serializer = CourseSerializer(data={'name': 'Bad Course', 'total_classes': 0, 'rate_per_class': '500.00'})
         self.assertFalse(serializer.is_valid())
         self.assertIn('total_classes', serializer.errors)
+
+
+class CourseMaterialFileSizeValidationTests(APITestCase):
+    """Django has no built-in file-size validator, so this is a custom one —
+    see courses.models.validate_course_material_size / MAX_COURSE_MATERIAL_SIZE.
+    Without it, an upload had no server-side size limit at all.
+    """
+
+    def test_oversized_file_is_rejected(self):
+        from .models import MAX_COURSE_MATERIAL_SIZE
+
+        course = Course.objects.create(name='Size Course', total_classes=24, rate_per_class=Decimal('500'))
+        oversized = SimpleUploadedFile(
+            'huge.pdf', b'%PDF-1.4 ' + b'x' * (MAX_COURSE_MATERIAL_SIZE + 1), content_type='application/pdf',
+        )
+        from .serializers import CourseMaterialSerializer
+
+        serializer = CourseMaterialSerializer(data={'course': course.id, 'title': 'Huge', 'file': oversized})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('file', serializer.errors)
+
+    def test_normal_sized_file_is_accepted(self):
+        course = Course.objects.create(name='Size Course Ok', total_classes=24, rate_per_class=Decimal('500'))
+        small = SimpleUploadedFile('small.pdf', b'%PDF-1.4 fake', content_type='application/pdf')
+        from .serializers import CourseMaterialSerializer
+
+        serializer = CourseMaterialSerializer(data={'course': course.id, 'title': 'Small', 'file': small})
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+
+class CourseMaterialTrainerScopingTests(APITestCase):
+    """A trainer only sees/downloads materials for courses they actually have
+    some current tie to — their own enrollments, a batch they're on, or a
+    course they're substitute-covering. See CourseMaterialViewSet.get_queryset().
+    """
+
+    def setUp(self):
+        from enrollments.models import Enrollment
+        from students.models import Student
+        from trainers.models import Trainer
+
+        self.factory = APIRequestFactory()
+        trainer_user = get_user_model().objects.create_user(username='material_scope_trainer', password='x')
+        self.trainer = Trainer.objects.create(
+            user=trainer_user, name='Material Trainer', phone_number='0000000000', place='Here',
+            default_rate_per_class=Decimal('100'),
+        )
+        self.my_course = Course.objects.create(name='My Course', total_classes=24, rate_per_class=Decimal('500'))
+        self.other_course = Course.objects.create(name='Other Course', total_classes=24, rate_per_class=Decimal('500'))
+        student = Student.objects.create(name='Kid', grade='5', source_type='B2C')
+        Enrollment.objects.create(
+            student=student, course=self.my_course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+
+        def _pdf(name):
+            return SimpleUploadedFile(name, b'%PDF-1.4 fake', content_type='application/pdf')
+
+        self.my_material = CourseMaterial.objects.create(course=self.my_course, title='Mine', file=_pdf('mine.pdf'))
+        self.other_material = CourseMaterial.objects.create(course=self.other_course, title='Not mine', file=_pdf('other.pdf'))
+
+    def test_trainer_only_sees_materials_for_their_own_courses(self):
+        request = self.factory.get('/api/course-materials/')
+        force_authenticate(request, user=self.trainer.user)
+        response = CourseMaterialViewSet.as_view({'get': 'list'})(request)
+
+        titles = [row['title'] for row in response.data['results']]
+        self.assertIn('Mine', titles)
+        self.assertNotIn('Not mine', titles)
+
+    def test_trainer_cannot_download_a_material_for_a_course_they_do_not_teach(self):
+        request = self.factory.get(f'/api/course-materials/{self.other_material.id}/download/')
+        force_authenticate(request, user=self.trainer.user)
+        response = CourseMaterialViewSet.as_view({'get': 'download'})(request, pk=self.other_material.id)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_sees_every_material(self):
+        admin = get_user_model().objects.create_user(username='material_scope_admin', password='x', is_staff=True)
+        request = self.factory.get('/api/course-materials/')
+        force_authenticate(request, user=admin)
+        response = CourseMaterialViewSet.as_view({'get': 'list'})(request)
+
+        titles = [row['title'] for row in response.data['results']]
+        self.assertIn('Mine', titles)
+        self.assertIn('Not mine', titles)

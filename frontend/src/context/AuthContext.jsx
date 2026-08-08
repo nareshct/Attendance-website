@@ -35,8 +35,16 @@ export function AuthProvider({ children }) {
     setAuth(null)
   }
 
+  // Swaps in a freshly-rotated token (see ChangePasswordView) without a full
+  // re-login — the backend deletes the old token as part of changing the
+  // password, so the copy already in localStorage would otherwise start
+  // failing every request right after a successful change.
+  function updateToken(token) {
+    setAuth((prev) => (prev ? { ...prev, token } : prev))
+  }
+
   return (
-    <AuthContext.Provider value={{ auth, login, logout }}>
+    <AuthContext.Provider value={{ auth, login, logout, updateToken }}>
       {children}
     </AuthContext.Provider>
   )

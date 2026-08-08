@@ -3,10 +3,25 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO
 
+from django.db import transaction
 from django.db.models import Count, Sum
 from openpyxl import Workbook, load_workbook
 
 from .models import PAYMENT_MILESTONES, Batch, BatchEnrollment, BatchInstallment
+
+
+# Mirrors reports.views.csv_safe() — a cell starting with =, +, -, or @ is executed as
+# a formula by Excel when opened. guest_name/phone/occupation/email/source here
+# originate from a public Google Form (via import_students_from_excel) or the enroll
+# form directly, so nothing stops one from starting with one of those characters.
+# openpyxl writes these as typed string cells (not CSV plain text), so the practical
+# risk is lower than reports/'s CSV exports, but the fix is free and keeps this
+# consistent with the rest of the app's exports.
+def _xlsx_safe(value):
+    text = str(value or '')
+    if text and text[0] in ('=', '+', '-', '@'):
+        return f"'{text}"
+    return text
 
 
 def create_batch_installments(batch_enrollment):
@@ -40,8 +55,12 @@ def batch_revenue_summary(batch):
     """Revenue for one batch — entirely independent of BillingCycle / Payout /
     ClientInvoice, which only cover individual per-class B2B/B2C billing.
 
-    - gross_expected: enrolled students x fee — the full amount this batch will bring
-      in once every installment is collected.
+    - gross_expected: the sum of every active enrollment's non-cancelled installments —
+      the full amount this batch will bring in once every installment is collected.
+      Summed from the actual installment amounts rather than enrolled_count x fee, since
+      BatchInstallmentSerializer.validate_amount allows discounting a still-pending
+      installment after signup — using the flat fee here would silently drift from what's
+      really owed once that happens.
     - collected: every installment actually marked paid, regardless of whether that
       student later withdrew — money genuinely received doesn't stop counting as
       revenue just because they left, unless explicitly refunded (see refunded_amount).
@@ -54,7 +73,9 @@ def batch_revenue_summary(batch):
     """
     active_enrollments = batch.batch_enrollments.filter(status='active')
     enrolled_count = active_enrollments.count()
-    gross_expected = enrolled_count * batch.fee_per_student
+    gross_expected = BatchInstallment.objects.filter(
+        batch_enrollment__batch=batch, batch_enrollment__status='active',
+    ).exclude(paid_status='cancelled').aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
 
     paid = BatchInstallment.objects.filter(
         batch_enrollment__batch=batch, paid_status='paid',
@@ -191,41 +212,48 @@ def import_students_from_excel(batch, file_obj):
         marked_paid = 0
         skipped = []
 
-        for row_num, row in enumerate(rows, start=2):
-            if row is None or all(v in (None, '') for v in row):
-                continue
+        # Without this, an error partway through a large sheet (a bad row, a transient
+        # DB error) left however many rows had already been created committed, with no
+        # way to tell from the response which rows made it in — a re-run of the same
+        # file would then also skip those already-committed rows via already_imported,
+        # making the gap invisible. Wrapping the whole pass in one transaction means a
+        # failure rolls back to "nothing imported", so a retry behaves like the first attempt.
+        with transaction.atomic():
+            for row_num, row in enumerate(rows, start=2):
+                if row is None or all(v in (None, '') for v in row):
+                    continue
 
-            name = cell(row, 'Name')
-            if not name:
-                skipped.append({'row': row_num, 'reason': 'Name is required.'})
-                continue
+                name = cell(row, 'Name')
+                if not name:
+                    skipped.append({'row': row_num, 'reason': 'Name is required.'})
+                    continue
 
-            phone = cell(row, 'Phone Number')
-            occupation = cell(row, 'Occupation')
-            email = cell(row, 'Email')
-            source = cell(row, 'How did you know about us?')
-            payment_status = cell(row, 'Payment Status')
+                phone = cell(row, 'Phone Number')
+                occupation = cell(row, 'Occupation')
+                email = cell(row, 'Email')
+                source = cell(row, 'How did you know about us?')
+                payment_status = cell(row, 'Payment Status')
 
-            phone_digits = _digits_only(phone)
-            if phone_digits and (name.lower(), phone_digits) in already_imported:
-                skipped.append({'row': row_num, 'reason': f'{name} is already enrolled in this batch.'})
-                continue
+                phone_digits = _digits_only(phone)
+                if phone_digits and (name.lower(), phone_digits) in already_imported:
+                    skipped.append({'row': row_num, 'reason': f'{name} is already enrolled in this batch.'})
+                    continue
 
-            enrollment = BatchEnrollment.objects.create(
-                batch=batch, student=None, guest_name=name, guest_phone_number=phone, guest_email=email,
-                guest_occupation=occupation, guest_source=source, joined_date=date.today(), status='active',
-            )
-            if phone_digits:
-                already_imported.add((name.lower(), phone_digits))
-            installments = create_batch_installments(enrollment)
-            enrolled += 1
+                enrollment = BatchEnrollment.objects.create(
+                    batch=batch, student=None, guest_name=name, guest_phone_number=phone, guest_email=email,
+                    guest_occupation=occupation, guest_source=source, joined_date=date.today(), status='active',
+                )
+                if phone_digits:
+                    already_imported.add((name.lower(), phone_digits))
+                installments = create_batch_installments(enrollment)
+                enrolled += 1
 
-            if payment_status.lower() in PAID_VALUES and installments:
-                first = installments[0]
-                first.paid_status = 'paid'
-                first.paid_date = date.today()
-                first.save(update_fields=['paid_status', 'paid_date'])
-                marked_paid += 1
+                if payment_status.lower() in PAID_VALUES and installments:
+                    first = installments[0]
+                    first.paid_status = 'paid'
+                    first.paid_date = date.today()
+                    first.save(update_fields=['paid_status', 'paid_date'])
+                    marked_paid += 1
 
         return {
             'enrolled': enrolled,
@@ -304,10 +332,13 @@ def build_export_workbook(batch):
         paid = sum((i.amount for i in e.installments.all() if i.paid_status == 'paid'), Decimal('0.00'))
         pending = sum((i.amount for i in e.installments.all() if i.paid_status == 'pending'), Decimal('0.00'))
         if e.student_id:
-            row = [e.student.name, 'Yes', e.student.student_id, e.student.parent_phone_number, '', '', '']
+            row = [_xlsx_safe(e.student.name), 'Yes', e.student.student_id, _xlsx_safe(e.student.parent_phone_number), '', '', '']
         else:
-            row = [e.guest_name, 'No', '', e.guest_phone_number, e.guest_occupation, e.guest_email, e.guest_source]
-        row += [e.status, e.joined_date.isoformat(), float(paid), float(pending)]
+            row = [
+                _xlsx_safe(e.guest_name), 'No', '', _xlsx_safe(e.guest_phone_number),
+                _xlsx_safe(e.guest_occupation), _xlsx_safe(e.guest_email), _xlsx_safe(e.guest_source),
+            ]
+        row += [e.status, e.joined_date.isoformat(), round(float(paid), 2), round(float(pending), 2)]
         sheet.append(row)
     buffer = BytesIO()
     workbook.save(buffer)

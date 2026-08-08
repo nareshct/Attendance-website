@@ -77,13 +77,22 @@ class ChangePasswordViewTests(TestCase):
 
     def test_correct_current_password_changes_it(self):
         response = self._post(current_password='OldPass123!', new_password='NewPass456!')
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password('NewPass456!'))
 
     def test_missing_fields_returns_400(self):
         response = self._post(current_password='OldPass123!')
         self.assertEqual(response.status_code, 400)
+
+    def test_changing_password_rotates_the_auth_token(self):
+        old_token = Token.objects.create(user=self.user)
+        response = self._post(current_password='OldPass123!', new_password='NewPass456!')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('token', response.data)
+        self.assertNotEqual(response.data['token'], old_token.key)
+        self.assertFalse(Token.objects.filter(key=old_token.key).exists())
+        self.assertTrue(Token.objects.filter(user=self.user, key=response.data['token']).exists())
 
 
 class MeViewTests(TestCase):
@@ -173,6 +182,15 @@ class PasswordResetConfirmViewTests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password('BrandNewPass789!'))
+
+    def test_resetting_the_password_deletes_any_existing_auth_token(self):
+        old_token = Token.objects.create(user=self.user)
+        request = self.factory.post('/api/auth/password-reset/confirm/', {
+            'uid': self.uidb64, 'token': self.token, 'new_password': 'BrandNewPass789!',
+        }, format='json')
+        response = PasswordResetConfirmView.as_view()(request)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Token.objects.filter(key=old_token.key).exists())
 
     def test_invalid_token_is_rejected(self):
         request = self.factory.post('/api/auth/password-reset/confirm/', {

@@ -639,6 +639,204 @@ class BatchRefundAndInstallmentEditTests(APITestCase):
         response = BatchInstallmentViewSet.as_view({'patch': 'partial_update'})(request, pk=installment.id)
         self.assertEqual(response.status_code, 400)
 
+    def test_negative_installment_amount_is_rejected(self):
+        batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
+        enrollment = BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
+        installment = create_batch_installments(enrollment)[0]
+
+        request = self._req('patch', f'/api/batch-installments/{installment.id}/', {'amount': '-500'})
+        response = BatchInstallmentViewSet.as_view({'patch': 'partial_update'})(request, pk=installment.id)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('amount', response.data)
+
+
+class BatchFeeValidationTests(APITestCase):
+    def test_negative_fee_per_student_is_rejected(self):
+        from .serializers import BatchSerializer
+
+        course = Course.objects.create(name='Fee Validation Course', total_classes=10)
+        serializer = BatchSerializer(data={
+            'name': 'Bad Fee Batch', 'course': course.id, 'total_classes': 10,
+            'fee_per_student': '-100', 'payment_type': 'one_time', 'start_date': '2026-01-01',
+        })
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('fee_per_student', serializer.errors)
+
+
+class BatchPayoutValidationTests(APITestCase):
+    """BatchPayout.amount previously had zero validation anywhere (unlike
+    BatchInstallment.amount) — see MinValueValidator on the model field."""
+
+    def test_negative_payout_amount_is_rejected(self):
+        from .serializers import BatchPayoutSerializer
+
+        batch = _make_batch()
+        serializer = BatchPayoutSerializer(data={'batch': batch.id, 'recipient_name': 'Priya', 'amount': '-500'})
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('amount', serializer.errors)
+
+
+class BatchInstallmentStatusGuardTests(APITestCase):
+    """mark_paid/revoke previously had no state-transition guard (unlike
+    BatchPayoutViewSet's equivalents) — a cancelled (withdrawn-student)
+    installment could be resurrected as paid, inflating collected revenue."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='installment_guard_admin', password='x', is_staff=True)
+        self.factory = APIRequestFactory()
+
+    def test_cannot_mark_a_cancelled_installment_paid(self):
+        batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
+        enrollment = BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
+        installment = create_batch_installments(enrollment)[0]
+        installment.paid_status = 'cancelled'
+        installment.save(update_fields=['paid_status'])
+
+        request = self.factory.post(f'/api/batch-installments/{installment.id}/mark_paid/')
+        force_authenticate(request, user=self.admin)
+        response = BatchInstallmentViewSet.as_view({'post': 'mark_paid'})(request, pk=installment.id)
+
+        self.assertEqual(response.status_code, 400)
+        installment.refresh_from_db()
+        self.assertEqual(installment.paid_status, 'cancelled')
+
+    def test_cannot_revoke_a_pending_installment(self):
+        batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
+        enrollment = BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
+        installment = create_batch_installments(enrollment)[0]
+
+        request = self.factory.post(f'/api/batch-installments/{installment.id}/revoke/')
+        force_authenticate(request, user=self.admin)
+        response = BatchInstallmentViewSet.as_view({'post': 'revoke'})(request, pk=installment.id)
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_can_still_revoke_a_paid_installment(self):
+        batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
+        enrollment = BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
+        installment = create_batch_installments(enrollment)[0]
+        installment.paid_status = 'paid'
+        installment.paid_date = datetime.date(2026, 7, 2)
+        installment.save(update_fields=['paid_status', 'paid_date'])
+
+        request = self.factory.post(f'/api/batch-installments/{installment.id}/revoke/')
+        force_authenticate(request, user=self.admin)
+        response = BatchInstallmentViewSet.as_view({'post': 'revoke'})(request, pk=installment.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        installment.refresh_from_db()
+        self.assertEqual(installment.paid_status, 'pending')
+
+
+class BatchEnrollmentDuplicateRaceTests(APITestCase):
+    """A guest enrollment previously had no DB-level uniqueness backstop at all —
+    only the app-level dedup check in BatchEnrollmentViewSet.create(), which two
+    near-simultaneous submissions could both pass. See BatchEnrollment.Meta.constraints.
+    """
+
+    def test_db_rejects_a_duplicate_guest_enrollment(self):
+        from django.db import IntegrityError
+
+        batch = _make_batch()
+        BatchEnrollment.objects.create(
+            batch=batch, student=None, guest_name='Same Guest', guest_phone_number='9000000000',
+            joined_date=datetime.date(2026, 7, 1),
+        )
+        with self.assertRaises(IntegrityError):
+            BatchEnrollment.objects.create(
+                batch=batch, student=None, guest_name='Same Guest', guest_phone_number='9000000000',
+                joined_date=datetime.date(2026, 7, 1),
+            )
+
+    def test_guests_with_the_same_name_and_no_phone_are_not_blocked(self):
+        # Two different people can share a common name with no phone on file —
+        # the constraint excludes a blank guest_phone_number specifically so this
+        # isn't wrongly treated as a duplicate.
+        batch = _make_batch()
+        BatchEnrollment.objects.create(
+            batch=batch, student=None, guest_name='Common Name', guest_phone_number='',
+            joined_date=datetime.date(2026, 7, 1),
+        )
+        BatchEnrollment.objects.create(
+            batch=batch, student=None, guest_name='Common Name', guest_phone_number='',
+            joined_date=datetime.date(2026, 7, 1),
+        )
+        self.assertEqual(BatchEnrollment.objects.filter(guest_name='Common Name').count(), 2)
+
+    def test_create_view_returns_a_clean_400_not_a_500_for_a_duplicate_guest(self):
+        admin = get_user_model().objects.create_user(username='dup_guest_admin', password='x', is_staff=True)
+        batch = _make_batch()
+        factory = APIRequestFactory()
+
+        def _create():
+            request = factory.post('/api/batch-enrollments/', {
+                'batch': batch.id, 'guest_name': 'Race Guest', 'guest_phone_number': '9111111111',
+            })
+            force_authenticate(request, user=admin)
+            return BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
+
+        first = _create()
+        self.assertEqual(first.status_code, 201, first.data)
+        second = _create()
+        self.assertEqual(second.status_code, 400)
+        self.assertEqual(BatchEnrollment.objects.filter(guest_name='Race Guest').count(), 1)
+
+
+class BatchGrossExpectedReflectsCorrectionsTests(TestCase):
+    """gross_expected previously used enrolled_count x fee_per_student, which
+    silently drifted from reality once a pending installment's amount was
+    corrected — see batch_revenue_summary()."""
+
+    def test_gross_expected_reflects_a_discounted_pending_installment(self):
+        batch = _make_batch(payment_type='two_installments', fee=Decimal('4000'))
+        enrollment = BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
+        installments = create_batch_installments(enrollment)
+        installments[0].paid_status = 'paid'
+        installments[0].save(update_fields=['paid_status'])
+        installments[1].amount = Decimal('1000.00')  # discounted from 2000
+        installments[1].save(update_fields=['amount'])
+
+        summary = batch_revenue_summary(batch)
+        self.assertEqual(summary['gross_expected'], Decimal('3000.00'))  # 2000 paid + 1000 discounted pending
+
+
+class BatchExportEscapesFormulaLookingFieldsTests(TestCase):
+    """Guest free text (name/phone/occupation/email/source) originates from a
+    public Google Form or the enroll form directly — a value starting with
+    =+-@ is written as a defused literal string, mirroring reports.views.csv_safe().
+    """
+
+    def test_formula_looking_guest_name_is_escaped_in_the_export(self):
+        from .services import build_export_workbook
+
+        batch = _make_batch()
+        BatchEnrollment.objects.create(
+            batch=batch, student=None, guest_name='=SUM(A1:A9)', guest_phone_number='9000000000',
+            joined_date=datetime.date(2026, 7, 1),
+        )
+        buffer = build_export_workbook(batch)
+        workbook = load_workbook(buffer)
+        sheet = workbook.active
+        name_cell = sheet.cell(row=2, column=1).value
+        self.assertEqual(name_cell, "'=SUM(A1:A9)")
+
+
+class BatchImportFileSizeCapTests(APITestCase):
+    def test_oversized_import_file_is_rejected(self):
+        from .views import BatchViewSet
+
+        admin = get_user_model().objects.create_user(username='import_size_admin', password='x', is_staff=True)
+        batch = _make_batch()
+        factory = APIRequestFactory()
+        oversized = SimpleUploadedFile(
+            'huge.xlsx', b'x' * (BatchViewSet.MAX_IMPORT_FILE_SIZE + 1),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        request = factory.post(f'/api/batches/{batch.id}/import_students/', {'file': oversized}, format='multipart')
+        force_authenticate(request, user=admin)
+        response = BatchViewSet.as_view({'post': 'import_students'})(request, pk=batch.id)
+        self.assertEqual(response.status_code, 400)
+
 
 class AllBatchesSummaryPerformanceTests(TestCase):
     def test_query_count_does_not_scale_with_batch_count(self):

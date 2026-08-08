@@ -69,9 +69,9 @@ export default function ClientDetailPage() {
     api(`/api/students/?client=${id}`).then(setStudents).catch(() => {})
     api(`/api/enrollments/?client=${id}`).then(setEnrollments).catch(() => {})
     api('/api/courses/').then(setCourses).catch(() => {})
-    loadInvoices().catch(() => {})
-    loadCurrentCycle().catch(() => {})
-    loadHistory().catch(() => {})
+    loadInvoices().catch((err) => setError(err.message))
+    loadCurrentCycle().catch((err) => setError(err.message))
+    loadHistory().catch((err) => setError(err.message))
   }, [api, id, loadClient, loadInvoices, loadCurrentCycle, loadHistory])
 
   async function handleDownloadInvoice(invoiceId) {
@@ -333,7 +333,7 @@ export default function ClientDetailPage() {
           </div>
           <div>
             <label className="block text-xs text-text-secondary mb-1">Rate per class (₹)</label>
-            <input required type="number" step="0.01" value={profileForm?.rate_per_class ?? ''} onChange={(e) => setProfileForm({ ...profileForm, rate_per_class: e.target.value })} className="input" />
+            <input required type="number" step="0.01" min="0" value={profileForm?.rate_per_class ?? ''} onChange={(e) => setProfileForm({ ...profileForm, rate_per_class: e.target.value })} className="input" />
           </div>
           {profileError && <p className="sm:col-span-3 text-error text-xs">{profileError}</p>}
           <div className="sm:col-span-3 flex justify-end gap-3">
@@ -430,7 +430,7 @@ export default function ClientDetailPage() {
                 <option value="">Select course…</option>
                 {availableCourses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <input required type="number" step="0.01" placeholder="Rate per class (₹)" value={rateForm.rate_per_class} onChange={(e) => setRateForm({ ...rateForm, rate_per_class: e.target.value })} className="input" />
+              <input required type="number" step="0.01" min="0" placeholder="Rate per class (₹)" value={rateForm.rate_per_class} onChange={(e) => setRateForm({ ...rateForm, rate_per_class: e.target.value })} className="input" />
               <Button disabled={submitting} type="submit" variant="success">
                 {submitting ? 'Saving…' : 'Save rate'}
               </Button>
@@ -477,6 +477,7 @@ export default function ClientDetailPage() {
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 autoFocus
                 value={editingRateAmount}
                 onChange={(e) => setEditingRateAmount(e.target.value)}

@@ -64,10 +64,22 @@ class AttendanceViewSet(ModelViewSet):
 
         trainer_id = self.request.query_params.get('trainer')
         date = self.request.query_params.get('date')
+        # Both bounds inclusive, same convention as reports/views.py's CSV exports —
+        # lets a caller ask for just the window it actually needs (e.g. the current +
+        # last billing cycle) instead of a trainer's entire history. Without this, a
+        # trainer active long enough to have taught 100+ classes total would trip the
+        # frontend's fail-loud pagination guard (see api/client.js unwrapPaginated) on
+        # every page that used to fetch this endpoint unbounded.
+        start = self.request.query_params.get('start')
+        end = self.request.query_params.get('end')
         if trainer_id and user.is_staff:
             qs = qs.filter(marked_by_id=trainer_id)
         if date:
             qs = qs.filter(date=date)
+        if start:
+            qs = qs.filter(date__gte=start)
+        if end:
+            qs = qs.filter(date__lte=end)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -76,6 +88,27 @@ class AttendanceViewSet(ModelViewSet):
 
         user = request.user
         if not user.is_staff and _is_closed(serializer.validated_data['date']):
+            # Without this check, a double-submit (or resubmitting after the tab was left
+            # open) would create a second pending request for the same class. Both would
+            # look approvable independently, but Attendance has a UniqueConstraint on
+            # (enrollment, date) — approving whichever one comes second would crash with
+            # an IntegrityError instead of a normal validation error. See approve() below
+            # for the matching guard on the other side of the same race.
+            existing_request = AttendanceRequest.objects.filter(
+                enrollment=serializer.validated_data['enrollment'],
+                date=serializer.validated_data['date'],
+                status='pending',
+            ).first()
+            if existing_request is not None:
+                return Response(
+                    {
+                        'pending_approval': True,
+                        'detail': 'A request for this date is already pending admin approval.',
+                        'request': AttendanceRequestSerializer(existing_request).data,
+                    },
+                    status=status.HTTP_202_ACCEPTED,
+                )
+
             req = AttendanceRequest.objects.create(
                 enrollment=serializer.validated_data['enrollment'],
                 date=serializer.validated_data['date'],
@@ -115,6 +148,13 @@ class AttendanceViewSet(ModelViewSet):
         user = self.request.user
 
         if not user.is_staff:
+            # get_queryset()'s ?enrollment= branch deliberately broadens read access to
+            # every session on one of the trainer's own current enrollments, including
+            # ones logged by a previous trainer before a transfer — that's for viewing
+            # history. Editing/deleting must stay narrower: only whoever actually
+            # marked_by this specific row, not whoever currently owns the enrollment.
+            if attendance.marked_by_id != user.trainer.id:
+                raise PermissionDenied('You can only edit a class you marked yourself.')
             allowed_fields = {'topic_covered', 'date'}
             if set(self.request.data.keys()) - allowed_fields:
                 raise ValidationError('You can only edit the date or topic covered for your own classes.')
@@ -136,6 +176,11 @@ class AttendanceViewSet(ModelViewSet):
 
     @transaction.atomic
     def perform_destroy(self, instance):
+        user = self.request.user
+        # See perform_update — same reasoning, marked_by not the enrollment's current trainer.
+        if not user.is_staff and instance.marked_by_id != user.trainer.id:
+            raise PermissionDenied('You can only delete a class you marked yourself.')
+
         # See perform_update — applies to admins too, for the same reason.
         if _is_closed(instance.date):
             raise PermissionDenied('This class falls in a closed billing cycle and can no longer be deleted.')
@@ -180,6 +225,17 @@ class AttendanceRequestViewSet(ReadOnlyModelViewSet):
         req = self.get_object()
         if req.status != 'pending':
             return Response({'detail': f'Request is already {req.status}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Belt-and-suspenders alongside the dedupe check in AttendanceViewSet.create():
+        # a second pending request for the same (enrollment, date) can still exist from
+        # before that check was added, or if the class got marked normally in the
+        # meantime. Catch it here as a normal validation error instead of letting
+        # Attendance's UniqueConstraint turn it into an unhandled IntegrityError/500.
+        if Attendance.objects.filter(enrollment=req.enrollment, date=req.date).exists():
+            return Response(
+                {'detail': 'A class is already recorded for this enrollment and date. Deny this request instead.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         with transaction.atomic():
             attendance = Attendance.objects.create(

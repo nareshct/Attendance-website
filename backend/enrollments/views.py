@@ -2,7 +2,8 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Q
+from django.db import transaction
+from django.db.models import Max, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import filters, status
@@ -77,22 +78,30 @@ class EnrollmentViewSet(ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        conflict = find_schedule_conflict(
-            trainer, enrollment.class_time, enrollment.class_days, exclude_enrollment_id=enrollment.id,
-        )
-        if conflict is not None:
-            return Response(
-                {'detail': f'{trainer.name} already has a class at that time — {conflict.student.name} ({conflict.course.name}). Choose a different trainer.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        with transaction.atomic():
+            # Locks this trainer's row for the duration of the check+write below, so two
+            # concurrent transfer/assign_substitute requests both targeting `trainer`
+            # can't both pass find_schedule_conflict() before either commits and
+            # double-book the same time slot — the second request blocks here until the
+            # first's transaction finishes, then sees the freshly created conflict.
+            Trainer.objects.select_for_update().get(pk=trainer.id)
 
-        previous_trainer_name = enrollment.trainer.name
-        enrollment.trainer = trainer
-        enrollment.save(update_fields=['trainer'])
-        log_action(
-            request.user, 'enrollment_transfer',
-            f'{enrollment.student.name} — {enrollment.course.name}', f'{previous_trainer_name} → {trainer.name}',
-        )
+            conflict = find_schedule_conflict(
+                trainer, enrollment.class_time, enrollment.class_days, exclude_enrollment_id=enrollment.id,
+            )
+            if conflict is not None:
+                return Response(
+                    {'detail': f'{trainer.name} already has a class at that time — {conflict.student.name} ({conflict.course.name}). Choose a different trainer.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            previous_trainer_name = enrollment.trainer.name
+            enrollment.trainer = trainer
+            enrollment.save(update_fields=['trainer'])
+            log_action(
+                request.user, 'enrollment_transfer',
+                f'{enrollment.student.name} — {enrollment.course.name}', f'{previous_trainer_name} → {trainer.name}',
+            )
         return Response(self.get_serializer(enrollment).data)
 
     @action(detail=True, methods=['post'])
@@ -119,6 +128,8 @@ class EnrollmentViewSet(ModelViewSet):
                 refund_amount = Decimal(str(refund_amount))
             except InvalidOperation:
                 return Response({'detail': 'refund_amount must be a number.'}, status=status.HTTP_400_BAD_REQUEST)
+            if refund_amount < 0:
+                return Response({'detail': 'refund_amount cannot be negative.'}, status=status.HTTP_400_BAD_REQUEST)
         else:
             refund_amount = None
 
@@ -172,25 +183,29 @@ class EnrollmentViewSet(ModelViewSet):
         if end_date < start_date:
             return Response({'detail': 'end_date cannot be before start_date.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        conflict = find_schedule_conflict(
-            substitute, enrollment.class_time, enrollment.class_days,
-            exclude_enrollment_id=enrollment.id, date_range=(start_date, end_date),
-        )
-        if conflict is not None:
-            return Response(
-                {'detail': f'{substitute.name} already has a class at that time — {conflict.student.name} ({conflict.course.name}). Choose a different trainer or time.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        with transaction.atomic():
+            # See the matching lock in transfer() above — same race, same fix.
+            Trainer.objects.select_for_update().get(pk=substitute.id)
 
-        assignment = SubstituteAssignment.objects.create(
-            enrollment=enrollment, substitute_trainer=substitute,
-            start_date=start_date, end_date=end_date, created_by=request.user,
-        )
-        log_action(
-            request.user, 'substitute_assign',
-            f'{enrollment.student.name} — {enrollment.course.name}',
-            f'{substitute.name} covering {start_date} to {end_date}',
-        )
+            conflict = find_schedule_conflict(
+                substitute, enrollment.class_time, enrollment.class_days,
+                exclude_enrollment_id=enrollment.id, date_range=(start_date, end_date),
+            )
+            if conflict is not None:
+                return Response(
+                    {'detail': f'{substitute.name} already has a class at that time — {conflict.student.name} ({conflict.course.name}). Choose a different trainer or time.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            assignment = SubstituteAssignment.objects.create(
+                enrollment=enrollment, substitute_trainer=substitute,
+                start_date=start_date, end_date=end_date, created_by=request.user,
+            )
+            log_action(
+                request.user, 'substitute_assign',
+                f'{enrollment.student.name} — {enrollment.course.name}',
+                f'{substitute.name} covering {start_date} to {end_date}',
+            )
         return Response(SubstituteAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
@@ -334,6 +349,14 @@ class MyStudentsView(ListAPIView):
             .prefetch_related('payment_plan__installments')
             .filter(Q(trainer=self.request.user.trainer) | Q(id__in=substitute_enrollment_ids))
             .exclude(Q(student__status='archived') & ~Q(status='completed'))
+            # Powers the dashboard's "No recent class" alert without a separate,
+            # unbounded /api/attendance/ fetch — see TrainerDashboard.jsx, which used
+            # to pull every attendance record this trainer has ever marked just to
+            # find each enrollment's most recent one. That broke outright once a
+            # trainer's lifetime total passed the API's page size (see api/client.js's
+            # unwrapPaginated) — an aggregate here needs one row per enrollment either
+            # way, so it never has that problem.
+            .annotate(last_class_date=Max('attendance_records__date', filter=Q(attendance_records__status='present')))
             .order_by('-start_date')
         )
 
@@ -346,6 +369,7 @@ class MyStudentsView(ListAPIView):
                 continue
             row = self.get_serializer(enrollment).data
             row['payment_blocked'] = gate == 'blocked'
+            row['last_class_date'] = enrollment.last_class_date
             if gate == 'blocked':
                 row['class_time'] = None
                 row['class_days'] = ''
