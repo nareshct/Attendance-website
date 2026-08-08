@@ -92,19 +92,19 @@ export default function ReportsPage() {
               onChange={(v) => setAttendanceReportFilters({ ...attendanceReportFilters, trainer: v })}
               options={[{ value: '', label: 'All trainers' }, ...trainers.map((t) => ({ value: t.id, label: t.name }))]}
             />
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <input
                 type="date"
                 value={attendanceReportFilters.start}
                 onChange={(e) => setAttendanceReportFilters({ ...attendanceReportFilters, start: e.target.value })}
-                className="input"
+                className="input flex-1 min-w-[140px]"
               />
               <span className="text-gray-400 text-sm">to</span>
               <input
                 type="date"
                 value={attendanceReportFilters.end}
                 onChange={(e) => setAttendanceReportFilters({ ...attendanceReportFilters, end: e.target.value })}
-                className="input"
+                className="input flex-1 min-w-[140px]"
               />
             </div>
           </div>
@@ -144,19 +144,19 @@ export default function ReportsPage() {
 
           <div className="pt-4 border-t border-gray-100">
             <p className="text-xs text-gray-500 mb-2">Attendance export — optional date range (leave blank for all-time):</p>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
               <input
                 type="date"
                 value={attendanceRange.start}
                 onChange={(e) => setAttendanceRange({ ...attendanceRange, start: e.target.value })}
-                className="input"
+                className="input flex-1 min-w-[140px]"
               />
               <span className="text-gray-400 text-sm">to</span>
               <input
                 type="date"
                 value={attendanceRange.end}
                 onChange={(e) => setAttendanceRange({ ...attendanceRange, end: e.target.value })}
-                className="input"
+                className="input flex-1 min-w-[140px]"
               />
             </div>
             <button
