@@ -565,6 +565,19 @@ export default function BatchDetailPage() {
     }
   }
 
+  async function handleCancelPayout(payoutId) {
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/api/batch-payouts/${payoutId}/cancel/`, { method: 'POST' })
+      await loadPayouts()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (error && !batch) return <p className="text-error text-sm">{error}</p>
   if (!batch) return <p className="text-text-tertiary text-sm">Loading…</p>
 
@@ -769,13 +782,19 @@ export default function BatchDetailPage() {
                     {p.recipient_name} <span className="text-text-secondary tabular-nums">· ₹{p.amount}</span>
                   </span>
                   <span className="flex items-center gap-2">
-                    <Badge status={p.paid ? 'paid' : 'pending'} />
-                    {p.paid ? (
-                      p.paid_date && <span className="text-xs text-text-tertiary">on {formatDate(p.paid_date)}</span>
-                    ) : (
-                      <button disabled={busy} onClick={() => handleMarkPayoutPaid(p.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
-                        Mark paid
-                      </button>
+                    <Badge status={p.paid_status} />
+                    {p.paid_status === 'paid' && p.paid_date && (
+                      <span className="text-xs text-text-tertiary">on {formatDate(p.paid_date)}</span>
+                    )}
+                    {p.paid_status === 'pending' && (
+                      <>
+                        <button disabled={busy} onClick={() => handleMarkPayoutPaid(p.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
+                          Mark paid
+                        </button>
+                        <button disabled={busy} onClick={() => handleCancelPayout(p.id)} className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring">
+                          Cancel
+                        </button>
+                      </>
                     )}
                   </span>
                 </li>

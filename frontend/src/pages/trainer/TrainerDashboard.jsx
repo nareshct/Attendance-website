@@ -105,12 +105,17 @@ export default function TrainerDashboard() {
         })
         setRestOfWeek(upcoming.sort((a, b) => a.dayIdx - b.dayIdx || (a.class_time || '').localeCompare(b.class_time || '')))
 
+        // A cancelled payout was never actually earned — exclude it from the trend
+        // chart and the "vs last payout" comparison, same as a cancelled payout is
+        // already excluded from every pending/earned total elsewhere in the app.
+        const realizedEarnings = earnings.filter((p) => p.paid_status !== 'cancelled')
+
         // Newest-first from the API — reverse the most recent 12 to chronological order
         // for the trend chart (oldest on the left), same convention as the admin
         // dashboard's client earnings trend.
-        setEarningsHistory(earnings.slice(0, 12).reverse())
+        setEarningsHistory(realizedEarnings.slice(0, 12).reverse())
 
-        const lastCycle = earnings.find(
+        const lastCycle = realizedEarnings.find(
           (p) => p.cycle_start !== current.cycle_start || p.cycle_end !== current.cycle_end,
         )
         setStats({

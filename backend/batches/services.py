@@ -66,7 +66,9 @@ def batch_revenue_summary(batch):
     total_refunded = batch.batch_enrollments.aggregate(total=Sum('refunded_amount'))['total'] or Decimal('0.00')
     collected = paid - total_refunded
 
-    total_payouts = batch.payouts.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    # A cancelled payout was never actually owed, unlike pending/paid which both
+    # still count under the accrual convention described above.
+    total_payouts = batch.payouts.exclude(paid_status='cancelled').aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
 
     return {
         'enrolled_count': enrolled_count,

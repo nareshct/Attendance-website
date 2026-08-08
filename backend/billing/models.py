@@ -36,6 +36,7 @@ class Payout(models.Model):
     PAID_STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('paid', 'Paid'),
+        ('cancelled', 'Cancelled'),
     ]
 
     trainer = models.ForeignKey(Trainer, on_delete=models.CASCADE, related_name='payouts')

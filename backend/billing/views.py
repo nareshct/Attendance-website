@@ -127,12 +127,25 @@ class PayoutViewSet(ReadOnlyModelViewSet):
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
         payout = self.get_object()
-        if payout.paid_status == 'paid':
-            return Response({'detail': 'Payout is already marked as paid.'}, status=400)
+        if payout.paid_status != 'pending':
+            return Response({'detail': f'Payout is already {payout.paid_status}.'}, status=400)
         payout.paid_status = 'paid'
         payout.save(update_fields=['paid_status'])
         log_action(
             request.user, 'payout_mark_paid',
+            f'{payout.trainer.name} — {payout.cycle}', f'₹{payout.total_amount}',
+        )
+        return Response(PayoutSerializer(payout).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        payout = self.get_object()
+        if payout.paid_status != 'pending':
+            return Response({'detail': f'Payout is already {payout.paid_status}.'}, status=400)
+        payout.paid_status = 'cancelled'
+        payout.save(update_fields=['paid_status'])
+        log_action(
+            request.user, 'payout_cancel',
             f'{payout.trainer.name} — {payout.cycle}', f'₹{payout.total_amount}',
         )
         return Response(PayoutSerializer(payout).data)

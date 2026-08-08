@@ -135,7 +135,7 @@ class BatchPayoutViewSet(ModelViewSet):
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
     def get_permissions(self):
-        if self.action in ('create', 'destroy', 'mark_paid'):
+        if self.action in ('create', 'destroy', 'mark_paid', 'cancel'):
             return [IsAdmin()]
         return [IsAdminOrTrainer()]
 
@@ -158,11 +158,26 @@ class BatchPayoutViewSet(ModelViewSet):
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
         payout = self.get_object()
-        payout.paid = True
+        if payout.paid_status != 'pending':
+            return Response({'detail': f'Payout is already {payout.paid_status}.'}, status=status.HTTP_400_BAD_REQUEST)
+        payout.paid_status = 'paid'
         payout.paid_date = date.today()
-        payout.save(update_fields=['paid', 'paid_date'])
+        payout.save(update_fields=['paid_status', 'paid_date'])
         log_action(
             request.user, 'batch_payout_mark_paid',
+            f'{payout.batch.name} — {payout.recipient_name}', f'₹{payout.amount}',
+        )
+        return Response(BatchPayoutSerializer(payout).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        payout = self.get_object()
+        if payout.paid_status != 'pending':
+            return Response({'detail': f'Payout is already {payout.paid_status}.'}, status=status.HTTP_400_BAD_REQUEST)
+        payout.paid_status = 'cancelled'
+        payout.save(update_fields=['paid_status'])
+        log_action(
+            request.user, 'batch_payout_cancel',
             f'{payout.batch.name} — {payout.recipient_name}', f'₹{payout.amount}',
         )
         return Response(BatchPayoutSerializer(payout).data)

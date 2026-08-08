@@ -117,10 +117,10 @@ class BatchRevenueSummaryTests(TestCase):
         self.assertEqual(summary['collected'], Decimal('2000.00'))
         self.assertEqual(summary['pending'], Decimal('10000.00'))
 
-    def test_net_after_payout_sums_every_payout_regardless_of_paid_status(self):
+    def test_net_after_payout_sums_every_pending_or_paid_payout(self):
         batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
         BatchPayout.objects.create(batch=batch, recipient_name='Trainer 1', amount=Decimal('3000'))
-        BatchPayout.objects.create(batch=batch, recipient_name='Trainer 2', amount=Decimal('2000'), paid=True)
+        BatchPayout.objects.create(batch=batch, recipient_name='Trainer 2', amount=Decimal('2000'), paid_status='paid')
         enrollment = BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
         inst = create_batch_installments(enrollment)[0]
         inst.paid_status = 'paid'
@@ -130,6 +130,14 @@ class BatchRevenueSummaryTests(TestCase):
         self.assertEqual(summary['collected'], Decimal('4000.00'))
         self.assertEqual(summary['total_payouts'], Decimal('5000.00'), 'both payouts count, paid or not')
         self.assertEqual(summary['net_after_payout'], Decimal('-1000.00'))
+
+    def test_net_after_payout_excludes_a_cancelled_payout(self):
+        batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
+        BatchPayout.objects.create(batch=batch, recipient_name='Trainer 1', amount=Decimal('3000'))
+        BatchPayout.objects.create(batch=batch, recipient_name='Trainer 2', amount=Decimal('2000'), paid_status='cancelled')
+
+        summary = batch_revenue_summary(batch)
+        self.assertEqual(summary['total_payouts'], Decimal('3000.00'), 'a cancelled payout was never actually owed')
 
     def test_withdrawn_students_are_excluded(self):
         batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
@@ -150,7 +158,7 @@ class BatchRevenueSummaryTests(TestCase):
             inst.paid_status = 'paid'
             inst.save()
         payout = BatchPayout.objects.create(batch=batch, recipient_name='Guest Instructor', amount=Decimal('1000'))
-        payout.paid = True
+        payout.paid_status = 'paid'
         payout.save()
 
         self.assertEqual(BillingCycle.objects.count(), 0)
@@ -314,15 +322,32 @@ class BatchApiTests(APITestCase):
         mark_request = self._req('post', f'/api/batch-payouts/{payout1_id}/mark_paid/', {})
         mark_response = BatchPayoutViewSet.as_view({'post': 'mark_paid'})(mark_request, pk=payout1_id)
         self.assertEqual(mark_response.status_code, 200)
-        self.assertTrue(mark_response.data['paid'])
+        self.assertEqual(mark_response.data['paid_status'], 'paid')
 
         # Trainer 2's payout is untouched by marking Trainer 1's paid.
         payout2_id = response2.data['id']
         get_request = self._req('get', f'/api/batch-payouts/?batch={batch.id}')
         list_response = BatchPayoutViewSet.as_view({'get': 'list'})(get_request)
         by_id = {p['id']: p for p in list_response.data['results']}
-        self.assertTrue(by_id[payout1_id]['paid'])
-        self.assertFalse(by_id[payout2_id]['paid'])
+        self.assertEqual(by_id[payout1_id]['paid_status'], 'paid')
+        self.assertEqual(by_id[payout2_id]['paid_status'], 'pending')
+
+    def test_admin_can_cancel_a_pending_batch_payout(self):
+        batch = _make_batch(payment_type='one_time')
+        payout = BatchPayout.objects.create(batch=batch, recipient_name='Trainer 1', amount=Decimal('3000'))
+
+        request = self._req('post', f'/api/batch-payouts/{payout.id}/cancel/', {})
+        response = BatchPayoutViewSet.as_view({'post': 'cancel'})(request, pk=payout.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['paid_status'], 'cancelled')
+
+    def test_cannot_cancel_an_already_paid_batch_payout(self):
+        batch = _make_batch(payment_type='one_time')
+        payout = BatchPayout.objects.create(batch=batch, recipient_name='Trainer 1', amount=Decimal('3000'), paid_status='paid')
+
+        request = self._req('post', f'/api/batch-payouts/{payout.id}/cancel/', {})
+        response = BatchPayoutViewSet.as_view({'post': 'cancel'})(request, pk=payout.id)
+        self.assertEqual(response.status_code, 400)
 
     def test_batch_can_have_any_number_of_free_text_trainer_names(self):
         # No cap, and not restricted to the registered Trainer table — "any buddy" can
@@ -870,6 +895,31 @@ class TrainerSelfServiceTests(APITestCase):
         self.assertEqual(response.status_code, 201, response.data)
         session = BatchSession.objects.get(id=response.data['id'])
         self.assertEqual(session.created_by_id, self.trainer.user.id)
+
+    def test_can_edit_is_true_for_the_owning_trainer_and_false_for_a_co_trainer(self):
+        session = BatchSession.objects.create(
+            batch=self.my_batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya', created_by=self.trainer.user,
+        )
+
+        request = self.factory.get(f'/api/batch-sessions/?batch={self.my_batch.id}')
+        force_authenticate(request, user=self.trainer.user)
+        response = BatchSessionViewSet.as_view({'get': 'list'})(request)
+        row = next(r for r in response.data['results'] if r['id'] == session.id)
+        self.assertTrue(row['can_edit'])
+
+        request = self.factory.get(f'/api/batch-sessions/?batch={self.my_batch.id}')
+        force_authenticate(request, user=self.other_trainer.user)
+        response = BatchSessionViewSet.as_view({'get': 'list'})(request)
+        row = next(r for r in response.data['results'] if r['id'] == session.id)
+        self.assertFalse(row['can_edit'])
+
+    def test_can_edit_is_true_for_a_legacy_session_with_no_created_by(self):
+        session = BatchSession.objects.create(batch=self.my_batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya')
+        request = self.factory.get(f'/api/batch-sessions/?batch={self.my_batch.id}')
+        force_authenticate(request, user=self.other_trainer.user)
+        response = BatchSessionViewSet.as_view({'get': 'list'})(request)
+        row = next(r for r in response.data['results'] if r['id'] == session.id)
+        self.assertTrue(row['can_edit'])
 
     def test_trainer_only_sees_their_own_payouts(self):
         BatchPayout.objects.create(batch=self.my_batch, recipient_name='Priya', amount=Decimal('1000'))

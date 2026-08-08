@@ -76,6 +76,19 @@ export default function PayoutsPage() {
     }
   }
 
+  async function handleCancelPayout(payoutId) {
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/api/payouts/${payoutId}/cancel/`, { method: 'POST' })
+      await loadAll()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleExport() {
     setBusy(true)
     setError('')
@@ -152,9 +165,14 @@ export default function PayoutsPage() {
                     <td className="table-cell">{isOpen ? <Badge status="open" /> : <Badge status={p.paid_status} />}</td>
                     <td className="table-cell text-right">
                       {!isOpen && p.paid_status === 'pending' && (
-                        <button disabled={busy} onClick={() => handleMarkPaid(p.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
-                          Mark as paid
-                        </button>
+                        <div className="flex items-center justify-end gap-3">
+                          <button disabled={busy} onClick={() => handleMarkPaid(p.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
+                            Mark as paid
+                          </button>
+                          <button disabled={busy} onClick={() => handleCancelPayout(p.id)} className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring">
+                            Cancel
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

@@ -610,3 +610,63 @@ class PayoutMarkPaidTests(APITestCase):
         self.assertEqual(self.payout.paid_status, 'paid')
         # The rejected second call didn't write another audit log entry.
         self.assertEqual(AuditLog.objects.filter(action='payout_mark_paid').count(), log_count_after_first)
+
+
+class PayoutCancelTests(APITestCase):
+    """See PayoutViewSet.cancel() — the counterpart to mark_paid, e.g. for a
+    payout that turns out not to be owed (trainer archived mid-cycle, etc)."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_cancel_payout', password='x', is_staff=True)
+        self.trainer = _make_trainer('trainer_cancel_payout', Decimal('100'))
+        self.cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 2, 1), cycle_end=datetime.date(2026, 2, 15), status='closed',
+        )
+        self.payout = Payout.objects.create(
+            trainer=self.trainer, cycle=self.cycle, total_classes=5, total_amount=Decimal('500.00'), paid_status='pending',
+        )
+        self.factory = APIRequestFactory()
+
+    def _cancel(self, user):
+        request = self.factory.post(f'/api/payouts/{self.payout.id}/cancel/')
+        force_authenticate(request, user=user)
+        return PayoutViewSet.as_view({'post': 'cancel'})(request, pk=self.payout.id)
+
+    def _mark_paid(self, user):
+        request = self.factory.post(f'/api/payouts/{self.payout.id}/mark_paid/')
+        force_authenticate(request, user=user)
+        return PayoutViewSet.as_view({'post': 'mark_paid'})(request, pk=self.payout.id)
+
+    def test_cancel_flips_status_and_logs_it(self):
+        response = self._cancel(self.admin)
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.payout.refresh_from_db()
+        self.assertEqual(self.payout.paid_status, 'cancelled')
+
+        log = AuditLog.objects.filter(action='payout_cancel').latest('created_at')
+        self.assertIn('trainer_cancel_payout', log.object_repr)
+
+    def test_non_admin_cannot_cancel(self):
+        other_trainer = _make_trainer('trainer_cancel_payout_denied', Decimal('100'))
+        response = self._cancel(other_trainer.user)
+        self.assertEqual(response.status_code, 403)
+
+        self.payout.refresh_from_db()
+        self.assertEqual(self.payout.paid_status, 'pending')
+
+    def test_cannot_cancel_an_already_paid_payout(self):
+        self._mark_paid(self.admin)
+        response = self._cancel(self.admin)
+        self.assertEqual(response.status_code, 400)
+
+        self.payout.refresh_from_db()
+        self.assertEqual(self.payout.paid_status, 'paid')
+
+    def test_cannot_mark_paid_a_cancelled_payout(self):
+        self._cancel(self.admin)
+        response = self._mark_paid(self.admin)
+        self.assertEqual(response.status_code, 400)
+
+        self.payout.refresh_from_db()
+        self.assertEqual(self.payout.paid_status, 'cancelled')

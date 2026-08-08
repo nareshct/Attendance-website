@@ -21,8 +21,8 @@ class BatchInstallmentSerializer(serializers.ModelSerializer):
 class BatchPayoutSerializer(serializers.ModelSerializer):
     class Meta:
         model = BatchPayout
-        fields = ['id', 'batch', 'recipient_name', 'amount', 'paid', 'paid_date', 'created_at']
-        read_only_fields = ['paid', 'paid_date', 'created_at']
+        fields = ['id', 'batch', 'recipient_name', 'amount', 'paid_status', 'paid_date', 'created_at']
+        read_only_fields = ['paid_status', 'paid_date', 'created_at']
 
 
 class BatchEnrollmentSerializer(serializers.ModelSerializer):
@@ -59,10 +59,22 @@ class BatchEnrollmentSerializer(serializers.ModelSerializer):
 
 
 class BatchSessionSerializer(serializers.ModelSerializer):
+    can_edit = serializers.SerializerMethodField()
+
     class Meta:
         model = BatchSession
-        fields = ['id', 'batch', 'date', 'conducted_by_name', 'topic_covered', 'recording_link', 'created_at']
+        fields = [
+            'id', 'batch', 'date', 'conducted_by_name', 'topic_covered', 'recording_link',
+            'created_at', 'can_edit',
+        ]
         read_only_fields = ['created_at']
+
+    def get_can_edit(self, obj):
+        request = self.context.get('request')
+        if request is None:
+            return True
+        user = request.user
+        return bool(user.is_staff or obj.created_by_id is None or obj.created_by_id == user.id)
 
 
 class BatchSerializer(serializers.ModelSerializer):
