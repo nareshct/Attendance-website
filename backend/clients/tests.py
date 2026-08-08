@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
+from attendance.models import Attendance
 from billing.models import BillingCycle, ClientInvoice
 from courses.models import Course
 from enrollments.models import Enrollment
@@ -164,3 +165,39 @@ class ClientArchiveHardBlockTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         client_obj.refresh_from_db()
         self.assertEqual(client_obj.status, 'archived')
+
+
+class ClientEarningsHistoryReopenedCycleTests(APITestCase):
+    """earnings_history() must use each 'open' cycle's own date range, not
+    silently default to today's — normally only today's cycle is ever 'open',
+    but BillingCycleViewSet.reopen() can put an old one back to 'open' too.
+    See ClientViewSet.earnings_history.
+    """
+
+    def test_a_reopened_past_cycle_shows_its_own_totals_not_todays(self):
+        from .views import ClientViewSet
+
+        admin = get_user_model().objects.create_user(username='admin_earnings_history_reopen', password='x', is_staff=True)
+        trainer_user = get_user_model().objects.create_user(username='trainer_earnings_history_reopen', password='x')
+        trainer = Trainer.objects.create(user=trainer_user, name='T Hist', phone_number='1', place='X', default_rate_per_class=Decimal('100'))
+        client_obj = Client.objects.create(company_name='History Reopen Co', contact_phone='123', rate_per_class=Decimal('200'))
+        course = Course.objects.create(name='History Course', total_classes=24)
+        student = Student.objects.create(name='History Kid', grade='5', source_type='B2B', client=client_obj)
+        enrollment = Enrollment.objects.create(
+            student=student, course=course, trainer=trainer, start_date=date(2026, 1, 1),
+            class_time='10:00', class_days='MON',
+        )
+        past_start, past_end = date(2026, 1, 1), date(2026, 1, 15)
+        cycle = BillingCycle.objects.create(cycle_start=past_start, cycle_end=past_end, status='open')
+        Attendance.objects.create(enrollment=enrollment, date=date(2026, 1, 5), status='present', marked_by=trainer)
+
+        factory = APIRequestFactory()
+        request = factory.get(f'/api/clients/{client_obj.id}/earnings-history/?limit=1')
+        force_authenticate(request, user=admin)
+        response = ClientViewSet.as_view({'get': 'earnings_history'})(request, pk=client_obj.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        row = response.data[0]
+        self.assertEqual(row['cycle_start'], past_start)
+        self.assertEqual(row['total_classes'], 1)
+        self.assertEqual(row['total_revenue'], Decimal('200.00'))

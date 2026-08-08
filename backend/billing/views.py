@@ -12,7 +12,7 @@ from audit.services import log_action
 from config.permissions import IsAdmin, IsTrainer
 
 from .invoice_pdf import render_invoice_pdf
-from .models import BillingCycle, ClientInvoice, Payout
+from .models import BillingCycle, ClientInvoice, CycleRevenueSnapshot, Payout
 from .serializers import BillingCycleSerializer, ClientInvoiceSerializer, PayoutSerializer
 from .services import (
     calculate_client_invoices_for_cycle,
@@ -58,6 +58,45 @@ class BillingCycleViewSet(ModelViewSet):
             snapshot_cycle_revenue(cycle)
             cycle.status = 'closed'
             cycle.save(update_fields=['status'])
+        log_action(request.user, 'billing_cycle_close', str(cycle))
+        return Response(BillingCycleSerializer(cycle).data)
+
+    @action(detail=True, methods=['post'])
+    def reopen(self, request, pk=None):
+        """Undo a mistaken close() — only while nothing it generated has been
+        acted on yet (a paid/cancelled payout or a received invoice would be
+        lost). Safe to do regardless of how long ago the cycle closed: every
+        "what's the current cycle" computation elsewhere in this app
+        (current_cycle_summary, current_payouts_for_cycle, get_or_create_cycle)
+        is driven by today's date, never by which cycle happens to have
+        status='open' — so reopening an old cycle can't collide with today's
+        live one. Deletes the Payout/ClientInvoice/CycleRevenueSnapshot rows
+        close() generated, so a later close() recomputes them fresh from
+        Attendance instead of leaving stale rows for a trainer/client who no
+        longer has any activity in the (possibly since-edited) cycle.
+        """
+        with transaction.atomic():
+            cycle = BillingCycle.objects.select_for_update().get(pk=pk)
+            if cycle.status != 'closed':
+                return Response({'detail': f'Cycle is {cycle.status}, not closed.'}, status=400)
+
+            if Payout.objects.filter(cycle=cycle).exclude(paid_status='pending').exists():
+                return Response(
+                    {'detail': 'Some payouts for this cycle are already paid or cancelled — reopening would lose that record. Reconcile manually instead.'},
+                    status=400,
+                )
+            if ClientInvoice.objects.filter(cycle=cycle).exclude(status='pending').exists():
+                return Response(
+                    {'detail': 'Some invoices for this cycle are already marked received — reopening would lose that record. Reconcile manually instead.'},
+                    status=400,
+                )
+
+            Payout.objects.filter(cycle=cycle).delete()
+            ClientInvoice.objects.filter(cycle=cycle).delete()
+            CycleRevenueSnapshot.objects.filter(cycle=cycle).delete()
+            cycle.status = 'open'
+            cycle.save(update_fields=['status'])
+        log_action(request.user, 'billing_cycle_reopen', str(cycle))
         return Response(BillingCycleSerializer(cycle).data)
 
     @action(detail=True, methods=['get'])

@@ -158,7 +158,11 @@ class ClientViewSet(ModelViewSet):
         history = []
         for cycle in cycles:
             if cycle.status == 'open':
-                totals = client_current_cycle_totals(client)
+                # Pass this exact cycle, not the default (today's) one — normally the
+                # only 'open' cycle is today's anyway, but BillingCycleViewSet.reopen()
+                # can put an old cycle back to 'open' too, and this loop would otherwise
+                # show today's totals against that old cycle's row instead of its own.
+                totals = client_current_cycle_totals(client, cycle=cycle)
             else:
                 totals = client_totals(client, cycle.cycle_start, cycle.cycle_end)
             history.append({

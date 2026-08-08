@@ -351,6 +351,97 @@ class BillingCycleCloseTests(APITestCase):
         self.assertEqual(self.cycle.status, 'open')
 
 
+class BillingCycleReopenTests(APITestCase):
+    """Undoing a mistaken close() — see BillingCycleViewSet.reopen(). Only
+    allowed while nothing it generated has been acted on yet; once anything's
+    paid/cancelled/received, reopening is refused rather than silently losing
+    that record.
+    """
+
+    def setUp(self):
+        from students.models import Student
+
+        self.admin = get_user_model().objects.create_user(username='admin_reopen_cycle', password='x', is_staff=True)
+        self.trainer = _make_trainer('trainer_reopen_cycle', Decimal('100'))
+        self.client_obj = Client.objects.create(
+            company_name='Reopen Cycle Co', contact_phone='123', rate_per_class=Decimal('200'),
+        )
+        self.course = Course.objects.create(name='Reopen Cycle Course', total_classes=24, rate_per_class=Decimal('300'))
+        self.student = Student.objects.create(name='Reopen Cycle Kid', grade='5', source_type='B2B', client=self.client_obj)
+        self.enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        self.cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='open',
+        )
+        Attendance.objects.create(
+            enrollment=self.enrollment, date=datetime.date(2026, 1, 5), status='present', marked_by=self.trainer,
+        )
+        self.factory = APIRequestFactory()
+        self._close()
+
+    def _close(self):
+        request = self.factory.post(f'/api/billing-cycles/{self.cycle.id}/close/')
+        force_authenticate(request, user=self.admin)
+        return BillingCycleViewSet.as_view({'post': 'close'})(request, pk=self.cycle.id)
+
+    def _reopen(self, user=None):
+        request = self.factory.post(f'/api/billing-cycles/{self.cycle.id}/reopen/')
+        force_authenticate(request, user=user or self.admin)
+        return BillingCycleViewSet.as_view({'post': 'reopen'})(request, pk=self.cycle.id)
+
+    def test_reopen_deletes_generated_rows_and_reopens_the_cycle(self):
+        response = self._reopen()
+        self.assertEqual(response.status_code, 200, response.data)
+
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'open')
+        self.assertFalse(Payout.objects.filter(cycle=self.cycle).exists())
+        self.assertFalse(ClientInvoice.objects.filter(cycle=self.cycle).exists())
+        self.assertFalse(CycleRevenueSnapshot.objects.filter(cycle=self.cycle).exists())
+
+    def test_cannot_reopen_an_already_open_cycle(self):
+        self._reopen()  # now open
+        response = self._reopen()
+        self.assertEqual(response.status_code, 400)
+
+    def test_reopen_is_blocked_once_a_payout_is_marked_paid(self):
+        payout = Payout.objects.get(trainer=self.trainer, cycle=self.cycle)
+        request = self.factory.post(f'/api/payouts/{payout.id}/mark_paid/')
+        force_authenticate(request, user=self.admin)
+        PayoutViewSet.as_view({'post': 'mark_paid'})(request, pk=payout.id)
+
+        response = self._reopen()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('already paid', response.data['detail'])
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'closed')
+        self.assertTrue(Payout.objects.filter(cycle=self.cycle).exists())
+
+    def test_reopen_is_blocked_once_an_invoice_is_marked_received(self):
+        invoice = ClientInvoice.objects.get(client=self.client_obj, cycle=self.cycle)
+        request = self.factory.post(f'/api/client-invoices/{invoice.id}/mark_received/')
+        force_authenticate(request, user=self.admin)
+        ClientInvoiceViewSet.as_view({'post': 'mark_received'})(request, pk=invoice.id)
+
+        response = self._reopen()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('already', response.data['detail'])
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'closed')
+        self.assertTrue(ClientInvoice.objects.filter(cycle=self.cycle).exists())
+
+    def test_non_admin_cannot_reopen(self):
+        trainer = _make_trainer('trainer_reopen_denied', Decimal('50'))
+        response = self._reopen(user=trainer.user)
+        self.assertEqual(response.status_code, 403)
+        self.cycle.refresh_from_db()
+        self.assertEqual(self.cycle.status, 'closed')
+
+
 class BillingCalculationFailureLoggingTests(TestCase):
     """See billing/services.py — calculate_payouts_for_cycle/
     calculate_client_invoices_for_cycle/snapshot_cycle_revenue each log the

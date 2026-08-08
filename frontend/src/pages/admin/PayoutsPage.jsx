@@ -3,6 +3,7 @@ import { downloadFile } from '../../api/client'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { formatDateRange } from '../../utils/date'
@@ -50,16 +51,44 @@ export default function PayoutsPage() {
     }
   }
 
-  async function handleClose(cycleId) {
+  const [closeTarget, setCloseTarget] = useState(null)
+
+  async function handleClose() {
+    const cycleId = closeTarget
     setBusy(true)
     setError('')
     try {
       await api(`/api/billing-cycles/${cycleId}/close/`, { method: 'POST' })
+      setCloseTarget(null)
       await loadAll()
     } catch (err) {
       setError(err.message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  const [reopenTarget, setReopenTarget] = useState(null)
+  const [reopenError, setReopenError] = useState('')
+  const [reopening, setReopening] = useState(false)
+
+  function openReopen(cycleId) {
+    setReopenTarget(cycleId)
+    setReopenError('')
+  }
+
+  async function handleReopen() {
+    const cycleId = reopenTarget
+    setReopening(true)
+    setReopenError('')
+    try {
+      await api(`/api/billing-cycles/${cycleId}/reopen/`, { method: 'POST' })
+      setReopenTarget(null)
+      await loadAll()
+    } catch (err) {
+      setReopenError(err.message)
+    } finally {
+      setReopening(false)
     }
   }
 
@@ -136,8 +165,13 @@ export default function PayoutsPage() {
                 {isOpen && <span className="text-xs text-text-tertiary">Live totals — updates as attendance is marked</span>}
               </div>
               {isOpen && (
-                <button disabled={busy} onClick={() => handleClose(c.id)} className="text-xs font-medium text-success hover:underline disabled:opacity-60 focus-ring">
+                <button disabled={busy} onClick={() => setCloseTarget(c.id)} className="text-xs font-medium text-success hover:underline disabled:opacity-60 focus-ring">
                   Close &amp; calculate payouts
+                </button>
+              )}
+              {!isOpen && (
+                <button disabled={busy} onClick={() => openReopen(c.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
+                  Reopen cycle
                 </button>
               )}
             </div>
@@ -190,6 +224,38 @@ export default function PayoutsPage() {
       {cycles.length === 0 && (
         <Card className="p-6 text-center text-text-tertiary">No billing cycles yet.</Card>
       )}
+
+      <ConfirmDialog
+        open={closeTarget != null}
+        onClose={() => setCloseTarget(null)}
+        onConfirm={handleClose}
+        title="Close billing cycle"
+        message={
+          closeTarget != null
+            ? `Close ${formatDateRange(cycles.find((c) => c.id === closeTarget)?.cycle_start, cycles.find((c) => c.id === closeTarget)?.cycle_end)}? This creates real, payable payouts for every trainer and invoices for every client with activity in this cycle. It can't be undone once anything is marked paid or received — reopen only works before that.`
+            : ''
+        }
+        confirmLabel="Close cycle"
+        busyLabel="Closing…"
+        busy={busy}
+        error={error}
+      />
+
+      <ConfirmDialog
+        open={reopenTarget != null}
+        onClose={() => setReopenTarget(null)}
+        onConfirm={handleReopen}
+        title="Reopen billing cycle"
+        message={
+          reopenTarget != null
+            ? `Reopen ${formatDateRange(cycles.find((c) => c.id === reopenTarget)?.cycle_start, cycles.find((c) => c.id === reopenTarget)?.cycle_end)}? This deletes the payouts and invoices it generated so they'll be recalculated from scratch the next time it's closed. Only possible while none of them have been marked paid, cancelled, or received yet.`
+            : ''
+        }
+        confirmLabel="Reopen cycle"
+        busyLabel="Reopening…"
+        busy={reopening}
+        error={reopenError}
+      />
     </div>
   )
 }
