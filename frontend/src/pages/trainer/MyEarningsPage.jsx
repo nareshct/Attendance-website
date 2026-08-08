@@ -26,8 +26,37 @@ export default function MyEarningsPage() {
     api('/api/attendance/').then(setAttendance).catch((err) => setError(err.message))
   }, [api])
 
+  // "Last cycle" always means the most recent formally-closed cycle — so this keeps
+  // excluding whatever matches the live current cycle's dates, even if that current
+  // cycle has since been settled early into a real Payout (see currentCycleAlreadySettled
+  // below): a just-settled current cycle isn't "last cycle," it's still this one.
   const history = payouts.filter((p) => !current || p.cycle_start !== current.cycle_start || p.cycle_end !== current.cycle_end)
   const lastCycle = history[0]
+
+  // Normally a cycle is either the live "still open" row or a real Payout row, never
+  // both — Payout rows only exist for cycles that have formally closed. But an admin
+  // can settle just one trainer's current cycle early (e.g. while resolving unpaid
+  // earnings before an archive), without closing the cycle for anyone else — so a
+  // real, possibly already-paid Payout can exist for a cycle that's still "open".
+  // Once that's happened, the Payout History table below shows that real row (with
+  // its real status) instead of a stale "open" live figure.
+  //
+  // But that settled Payout is a snapshot — the API keeps recomputing `current` live
+  // off attendance/adjustments, so if more classes get taught (or a late request gets
+  // approved) in this same still-open cycle after settling, the live total moves past
+  // what the Payout recorded. Comparing amounts (not just existence) catches that;
+  // currentCycleAdditional then surfaces the newly-accrued delta instead of silently
+  // hiding it behind the settled row's stale figure.
+  const currentCyclePayout = current && payouts.find(
+    (p) => p.cycle_start === current.cycle_start && p.cycle_end === current.cycle_end,
+  )
+  const currentCycleFullySettled = currentCyclePayout && Number(currentCyclePayout.total_amount) === Number(current.total_amount)
+  const currentCycleAdditional = currentCyclePayout && !currentCycleFullySettled
+    ? {
+      classes: current.total_classes - currentCyclePayout.total_classes,
+      amount: (Number(current.total_amount) - Number(currentCyclePayout.total_amount)).toFixed(2),
+    }
+    : null
 
   const lastCycleClasses = lastCycle
     ? attendance
@@ -149,7 +178,7 @@ export default function MyEarningsPage() {
             </tr>
           </thead>
           <tbody>
-            {current && (
+            {current && !currentCyclePayout && (
               <tr className="table-row bg-warning-tint/50">
                 <td className="table-cell">{formatDateRange(current.cycle_start, current.cycle_end)}</td>
                 <td className="table-cell tabular-nums">{current.total_classes}</td>
@@ -162,6 +191,30 @@ export default function MyEarningsPage() {
                   )}
                 </td>
                 <td className="table-cell"><Badge status="open" /></td>
+              </tr>
+            )}
+            {currentCycleAdditional && (
+              <tr className="table-row bg-warning-tint/50">
+                <td className="table-cell">{formatDateRange(current.cycle_start, current.cycle_end)}</td>
+                <td className="table-cell tabular-nums">+{currentCycleAdditional.classes}</td>
+                <td className="table-cell tabular-nums">
+                  +₹{currentCycleAdditional.amount}
+                  <div className="text-xs text-warning">earned after the payout below was settled</div>
+                </td>
+                <td className="table-cell"><Badge status="open" /></td>
+              </tr>
+            )}
+            {currentCyclePayout && (
+              <tr key={currentCyclePayout.id} className="table-row">
+                <td className="table-cell">{formatDateRange(currentCyclePayout.cycle_start, currentCyclePayout.cycle_end)}</td>
+                <td className="table-cell tabular-nums">{currentCyclePayout.total_classes}</td>
+                <td className="table-cell tabular-nums">
+                  ₹{currentCyclePayout.total_amount}
+                  {Number(currentCyclePayout.carried_forward_amount) > 0 && (
+                    <div className="text-xs text-text-tertiary">(incl. ₹{currentCyclePayout.carried_forward_amount} carried forward)</div>
+                  )}
+                </td>
+                <td className="table-cell"><Badge status={currentCyclePayout.paid_status} /></td>
               </tr>
             )}
             {history.map((p) => (

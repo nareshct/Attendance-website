@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
+import { ArchiveTrainerModal } from '../../components/ArchiveTrainerModal'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -69,6 +70,10 @@ export default function TrainerDetailPage() {
   const [profileForm, setProfileForm] = useState(null)
   const [profileError, setProfileError] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
+
+  const [showArchiveModal, setShowArchiveModal] = useState(false)
+  const [unarchiving, setUnarchiving] = useState(false)
+  const [unarchiveError, setUnarchiveError] = useState('')
 
   const loadTrainer = useCallback(async () => {
     setTrainer(await api(`/api/trainers/${id}/`))
@@ -243,6 +248,19 @@ export default function TrainerDetailPage() {
     }
   }
 
+  async function handleUnarchive() {
+    setUnarchiving(true)
+    setUnarchiveError('')
+    try {
+      await api(`/api/trainers/${id}/unarchive/`, { method: 'POST' })
+      await loadTrainer()
+    } catch (err) {
+      setUnarchiveError(err.message)
+    } finally {
+      setUnarchiving(false)
+    }
+  }
+
   if (error && !trainer) return <p className="text-error text-sm">{error}</p>
   if (!trainer) return <p className="text-text-tertiary text-sm">Loading…</p>
 
@@ -261,6 +279,32 @@ export default function TrainerDetailPage() {
     .filter((p) => p.paid_status === 'pending')
     .reduce((sum, p) => sum + Number(p.total_amount), 0)
 
+  // Normally a cycle only ever appears as either the live "still open" row or a real
+  // Payout row, never both — Payout rows only exist for cycles that have formally
+  // closed. But an admin can settle just one trainer's current cycle early (see
+  // TrainerViewSet.settle_current_cycle, used when archiving someone with unpaid
+  // current-cycle earnings) without closing the cycle for anyone else, so a real
+  // Payout can now exist for a cycle that's still "open". Once that's happened, show
+  // the real (possibly paid/cancelled) row instead of the misleading live "open" one.
+  //
+  // But that settled Payout is a snapshot — current_cycle_summary() keeps recomputing
+  // live off Attendance/PayoutAdjustment, so if the trainer teaches (or gets a late
+  // request approved) again in this same still-open cycle after settling, the live
+  // total moves past what the Payout recorded. Comparing amounts (not just existence)
+  // catches that; currentCycleAdditional then surfaces the newly-accrued delta instead
+  // of silently swallowing it into the settled row's stale figure. Mirrors
+  // current_cycle_fully_settled in trainers/services.get_archive_blockers().
+  const currentCyclePayout = currentCycle && payouts.find(
+    (p) => p.cycle_start === currentCycle.cycle_start && p.cycle_end === currentCycle.cycle_end,
+  )
+  const currentCycleFullySettled = currentCyclePayout && Number(currentCyclePayout.total_amount) === Number(currentCycle.total_amount)
+  const currentCycleAdditional = currentCyclePayout && !currentCycleFullySettled
+    ? {
+      classes: currentCycle.total_classes - currentCyclePayout.total_classes,
+      amount: (Number(currentCycle.total_amount) - Number(currentCyclePayout.total_amount)).toFixed(2),
+    }
+    : null
+
   return (
     <div>
       <Link to={backTo} className="text-sm font-medium text-primary hover:underline focus-ring">&larr; {backLabel}</Link>
@@ -270,10 +314,18 @@ export default function TrainerDetailPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Badge status={trainer.status} />
           {!editingProfile && <Button variant="success" onClick={openEditProfile}>Edit details</Button>}
+          {trainer.status === 'active' ? (
+            <Button variant="secondary" onClick={() => setShowArchiveModal(true)}>Archive</Button>
+          ) : (
+            <Button variant="secondary" disabled={unarchiving} onClick={handleUnarchive}>
+              {unarchiving ? 'Unarchiving…' : 'Unarchive'}
+            </Button>
+          )}
         </div>
       </div>
 
       {error && <p className="text-error text-sm mb-4">{error}</p>}
+      {unarchiveError && <p className="text-error text-sm mb-4">{unarchiveError}</p>}
 
       <Card className="mb-6">
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm mb-4">
@@ -532,7 +584,7 @@ export default function TrainerDetailPage() {
             </tr>
           </thead>
           <tbody>
-            {currentCycle && (
+            {currentCycle && !currentCyclePayout && (
               <tr className="table-row bg-warning-tint/50">
                 <td className="table-cell">{formatDateRange(currentCycle.cycle_start, currentCycle.cycle_end)}</td>
                 <td className="table-cell tabular-nums">
@@ -550,6 +602,17 @@ export default function TrainerDetailPage() {
                       incl. ₹{currentCycle.carried_forward_amount} from {currentCycle.carried_forward_count} late-approved class{currentCycle.carried_forward_count === 1 ? '' : 'es'}
                     </div>
                   )}
+                </td>
+                <td className="table-cell"><Badge status="open" /></td>
+              </tr>
+            )}
+            {currentCycleAdditional && (
+              <tr className="table-row bg-warning-tint/50">
+                <td className="table-cell">{formatDateRange(currentCycle.cycle_start, currentCycle.cycle_end)}</td>
+                <td className="table-cell tabular-nums">+{currentCycleAdditional.classes}</td>
+                <td className="table-cell tabular-nums">
+                  +₹{currentCycleAdditional.amount}
+                  <div className="text-xs text-warning">earned after the payout below was settled</div>
                 </td>
                 <td className="table-cell"><Badge status="open" /></td>
               </tr>
@@ -598,6 +661,14 @@ export default function TrainerDetailPage() {
         danger
         busy={deletingRateId === rateDeleteTarget}
         error={rateError}
+      />
+
+      <ArchiveTrainerModal
+        open={showArchiveModal}
+        trainerId={trainer.id}
+        trainerName={trainer.name}
+        onClose={() => setShowArchiveModal(false)}
+        onArchived={loadTrainer}
       />
     </div>
   )
