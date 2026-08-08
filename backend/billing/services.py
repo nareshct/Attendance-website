@@ -173,6 +173,63 @@ def current_cycle_summary(trainer):
     }
 
 
+class AlreadyDecidedCycleMismatch(Exception):
+    """Raised by settle_trainer_current_cycle() when the trainer's live current-
+    cycle total has grown past what an already-paid/cancelled Payout for that
+    same cycle recorded — e.g. an attendance request got approved (crediting a
+    new PayoutAdjustment to this cycle) after the cycle was already settled and
+    marked paid. Silently bumping an already-decided payout's amount would
+    misrepresent what was actually paid, so this refuses instead — surfaced to
+    the admin, who needs to reconcile it manually (see billing/views.py's
+    PayoutViewSet for the normal mark_paid/cancel actions)."""
+
+
+def settle_trainer_current_cycle(trainer):
+    """Materializes a real Payout row for `trainer`'s current, still-open cycle
+    right now, without closing the cycle for anyone else — unlike
+    calculate_payouts_for_cycle(), which only ever runs as part of formally
+    closing a cycle for every trainer at once.
+
+    For a trainer being archived with real unpaid earnings sitting in the
+    still-open current cycle (regular attendance, or a carried-forward
+    PayoutAdjustment from a late-approved attendance request — see
+    AttendanceRequestViewSet.approve), waiting for the whole cycle to close
+    naturally could be weeks away. This settles just their share now, as an
+    ordinary pending Payout — mark_paid/cancel then handle it exactly like any
+    other payout.
+
+    Safe to call more than once while the resulting Payout is still pending —
+    e.g. if more attendance gets approved for this cycle after an earlier
+    settle, calling this again just refreshes the same row's totals. But once
+    that Payout has been marked paid or cancelled, this refuses to touch it
+    again if the live total no longer matches what was recorded — raises
+    AlreadyDecidedCycleMismatch rather than silently changing a decided
+    amount.
+
+    Returns None, creating nothing, if there's zero classes and zero
+    adjustments this cycle — an empty Payout row would just be noise.
+    """
+    summary = current_cycle_summary(trainer)
+    if summary['total_classes'] == 0:
+        return None
+
+    cycle, _ = get_or_create_cycle()
+    existing = Payout.objects.filter(trainer=trainer, cycle=cycle).first()
+    if existing is not None and existing.paid_status != 'pending' and existing.total_amount != summary['total_amount']:
+        raise AlreadyDecidedCycleMismatch(
+            f"This trainer's current-cycle payout was already marked {existing.paid_status} at "
+            f"₹{existing.total_amount}, but their live total for this cycle is now ₹{summary['total_amount']} "
+            '— likely a late attendance request got approved afterward. Reconcile this manually '
+            'on the Payouts page rather than settling again.'
+        )
+
+    payout, _ = Payout.objects.update_or_create(
+        trainer=trainer, cycle=cycle,
+        defaults={'total_classes': summary['total_classes'], 'total_amount': summary['total_amount']},
+    )
+    return payout
+
+
 def client_current_cycle_totals(client, cycle=None, as_of=None):
     """Totals for a client's billing cycle — "current" by default, but works
     for any cycle you pass, using *that cycle's own* date range. Also folds in

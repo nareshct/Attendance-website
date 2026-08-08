@@ -9,12 +9,15 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
+from audit.services import log_action
 from billing.models import Payout
-from billing.services import current_cycle_summary
+from billing.serializers import PayoutSerializer
+from billing.services import AlreadyDecidedCycleMismatch, current_cycle_summary, settle_trainer_current_cycle
 from config.permissions import IsAdmin
 
 from .models import Trainer, TrainerCourseRate
 from .serializers import TrainerCourseRateSerializer, TrainerSerializer
+from .services import get_archive_blockers
 
 
 class TrainerViewSet(ModelViewSet):
@@ -50,11 +53,52 @@ class TrainerViewSet(ModelViewSet):
             pending_payout_amount=Coalesce(Subquery(pending_payouts), Decimal('0.00')),
         )
 
+    @action(detail=True, methods=['get'], url_path='archive-blockers')
+    def archive_blockers(self, request, pk=None):
+        """Everything still tying this trainer to active/unresolved work — the
+        frontend fetches this to build the archive warning checklist, and
+        `archive()` below re-checks the same thing server-side so it can't be
+        bypassed by calling the API directly."""
+        trainer = self.get_object()
+        return Response(get_archive_blockers(trainer))
+
+    @action(detail=True, methods=['post'], url_path='settle-current-cycle')
+    def settle_current_cycle(self, request, pk=None):
+        """Materializes this trainer's still-open current cycle into a real,
+        immediately payable Payout row — see billing.services.settle_trainer_
+        current_cycle. Resolves the 'current_cycle_earnings' archive blocker
+        without waiting for the shared cycle to close for every trainer."""
+        trainer = self.get_object()
+        try:
+            payout = settle_trainer_current_cycle(trainer)
+        except AlreadyDecidedCycleMismatch as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if payout is None:
+            return Response({'detail': 'No unpaid current-cycle earnings to settle.'}, status=status.HTTP_400_BAD_REQUEST)
+        log_action(request.user, 'payout_settle_current_cycle', f'{trainer.name} — {payout.cycle}', f'₹{payout.total_amount}')
+        return Response(PayoutSerializer(payout).data)
+
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
         trainer = self.get_object()
+        blockers = get_archive_blockers(trainer)
+        if any(blockers.values()):
+            return Response(
+                {
+                    'detail': 'This trainer still has ongoing batches/enrollments, pending attendance '
+                    'requests, or pending payouts — resolve them first.',
+                    'blockers': blockers,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         trainer.status = 'archived'
         trainer.save(update_fields=['status'])
+        # is_active=False both blocks a future login (authenticate()) and immediately
+        # invalidates any session/token they're already logged in with (DRF's
+        # TokenAuthentication rejects inactive users on every request) — an archived
+        # trainer loses access right away, not just on their next login attempt.
+        trainer.user.is_active = False
+        trainer.user.save(update_fields=['is_active'])
         return Response(TrainerSerializer(trainer).data)
 
     @action(detail=True, methods=['post'])
@@ -62,6 +106,8 @@ class TrainerViewSet(ModelViewSet):
         trainer = self.get_object()
         trainer.status = 'active'
         trainer.save(update_fields=['status'])
+        trainer.user.is_active = True
+        trainer.user.save(update_fields=['is_active'])
         return Response(TrainerSerializer(trainer).data)
 
     @action(detail=True, methods=['post'], url_path='reset-password')

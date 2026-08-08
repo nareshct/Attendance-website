@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ArchiveTrainerModal } from '../../components/ArchiveTrainerModal'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
@@ -73,10 +74,7 @@ export default function TrainersPage() {
     }
   }
 
-  async function handleArchive(id) {
-    await api(`/api/trainers/${id}/archive/`, { method: 'POST' })
-    await loadTrainers()
-  }
+  const [archiveTarget, setArchiveTarget] = useState(null)
 
   async function handleUnarchive(id) {
     await api(`/api/trainers/${id}/unarchive/`, { method: 'POST' })
@@ -208,7 +206,7 @@ export default function TrainersPage() {
                 <td className="table-cell tabular-nums text-warning font-medium">₹{t.payout_pending}</td>
                 <td className="table-cell text-right">
                   {t.status === 'active' ? (
-                    <button onClick={() => handleArchive(t.id)} className="text-xs text-text-secondary hover:text-error focus-ring">
+                    <button onClick={() => setArchiveTarget(t)} className="text-xs text-text-secondary hover:text-error focus-ring">
                       Archive
                     </button>
                   ) : (
@@ -225,6 +223,14 @@ export default function TrainersPage() {
           </tbody>
         </table>
       </Card>
+
+      <ArchiveTrainerModal
+        open={Boolean(archiveTarget)}
+        trainerId={archiveTarget?.id}
+        trainerName={archiveTarget?.name}
+        onClose={() => setArchiveTarget(null)}
+        onArchived={loadTrainers}
+      />
     </div>
   )
 }
