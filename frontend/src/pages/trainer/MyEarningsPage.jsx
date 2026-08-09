@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Card, StatCard } from '../../components/Card'
 import { useApi } from '../../hooks/useApi'
+import { usePaginatedList } from '../../hooks/usePaginatedList'
 import { formatDate, formatDateRange } from '../../utils/date'
 
 // Deliberately one restrained hero color, not a rainbow of accents per
@@ -14,17 +15,27 @@ const HERO_VALUE_CLASS = 'text-navy'
 
 export default function MyEarningsPage() {
   const api = useApi()
-  const [payouts, setPayouts] = useState([])
+  // Same paginated "Load more"/"Load less" pattern as the admin Payouts page —
+  // /api/my-earnings/ is paginated server-side (see DEFAULT_PAGINATION_CLASS in
+  // backend/config/settings.py), so an unbounded fetch here would eventually hit
+  // unwrapPaginated()'s fail-loud guard once a trainer's payout history passed one page.
+  const {
+    items: payouts, count: payoutsCount, hasMore: payoutsHasMore, loadingMore: payoutsLoadingMore,
+    reload: loadPayouts, loadMore: loadMorePayouts, loadLess: loadLessPayouts, page: payoutsPage,
+  } = usePaginatedList('/api/my-earnings/')
   const [current, setCurrent] = useState(null)
   const [attendance, setAttendance] = useState([])
   const [showLastCycleClasses, setShowLastCycleClasses] = useState(false)
   const [loadingLastCycleClasses, setLoadingLastCycleClasses] = useState(false)
+  const [currentCycleAttendance, setCurrentCycleAttendance] = useState([])
+  const [showCurrentCycleClasses, setShowCurrentCycleClasses] = useState(false)
+  const [loadingCurrentCycleClasses, setLoadingCurrentCycleClasses] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    api('/api/my-earnings/').then(setPayouts).catch((err) => setError(err.message))
+    loadPayouts().catch((err) => setError(err.message))
     api('/api/my-earnings/current/').then(setCurrent).catch((err) => setError(err.message))
-  }, [api])
+  }, [api, loadPayouts])
 
   // "Last cycle" always means the most recent formally-closed cycle — so this keeps
   // excluding whatever matches the live current cycle's dates, even if that current
@@ -44,11 +55,34 @@ export default function MyEarningsPage() {
     setLoadingLastCycleClasses(true)
     setError('')
     try {
-      setAttendance(await api(`/api/attendance/?start=${lastCycle.cycle_start}&end=${lastCycle.cycle_end}`))
+      setAttendance(await api(
+        `/api/attendance/?start=${lastCycle.cycle_start}&end=${lastCycle.cycle_end}&carried_forward_cycle=${lastCycle.cycle}`
+      ))
     } catch (err) {
       setError(err.message)
     } finally {
       setLoadingLastCycleClasses(false)
+    }
+  }
+
+  // Same on-demand, bounded-fetch approach as toggleLastCycleClasses() — a separate
+  // state/fetch rather than reusing `attendance`, since the current and last cycle's
+  // date ranges are fetched independently and could otherwise clobber each other if
+  // both sections are opened.
+  async function toggleCurrentCycleClasses() {
+    const opening = !showCurrentCycleClasses
+    setShowCurrentCycleClasses(opening)
+    if (!opening || !current) return
+    setLoadingCurrentCycleClasses(true)
+    setError('')
+    try {
+      setCurrentCycleAttendance(await api(
+        `/api/attendance/?start=${current.cycle_start}&end=${current.cycle_end}&carried_forward_cycle=${current.cycle_id}`
+      ))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoadingCurrentCycleClasses(false)
     }
   }
 
@@ -77,11 +111,16 @@ export default function MyEarningsPage() {
     }
     : null
 
-  const lastCycleClasses = lastCycle
-    ? attendance
-        .filter((a) => a.date >= lastCycle.cycle_start && a.date <= lastCycle.cycle_end)
-        .sort((a, b) => a.date.localeCompare(b.date))
-    : []
+  // No date-range filter here — the API call above already scopes this to exactly the
+  // right set, including any carried-forward classes whose own date falls outside
+  // [cycle_start, cycle_end] (see AttendanceViewSet.get_queryset's carried_forward_cycle
+  // param). isCarriedForward flags those for the "carried forward" note below.
+  const lastCycleClasses = [...attendance].sort((a, b) => a.date.localeCompare(b.date))
+  const currentCycleClasses = [...currentCycleAttendance].sort((a, b) => a.date.localeCompare(b.date))
+
+  function isCarriedForward(a, cycle) {
+    return a.date < cycle.cycle_start || a.date > cycle.cycle_end
+  }
 
   return (
     <div>
@@ -108,25 +147,71 @@ export default function MyEarningsPage() {
           }
           accentClass={HERO_VALUE_CLASS}
         />
-        <StatCard
-          label="Current cycle classes"
-          value={
-            current
-              ? current.carried_forward_count > 0
-                ? (
-                  <>
-                    {current.total_classes}{' '}
-                    <span className="text-xs text-warning font-normal">
-                      incl. ₹{current.carried_forward_amount} from {current.carried_forward_count} late-approved class{current.carried_forward_count === 1 ? '' : 'es'}
-                    </span>
-                  </>
-                )
-                : current.total_classes
-              : '—'
-          }
-          accentClass={HERO_VALUE_CLASS}
-        />
+        <button
+          type="button"
+          disabled={!current}
+          onClick={toggleCurrentCycleClasses}
+          className="text-left disabled:cursor-default rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        >
+          <Card className={current ? 'hover:border-primary-tint-border hover:shadow-sm transition-[box-shadow,border-color] duration-150 ease-out cursor-pointer' : ''}>
+            <div className="text-xs font-medium text-text-secondary">Current cycle classes</div>
+            <div className="flex items-center gap-2 mt-1.5">
+              <span className="text-[26px] font-bold tracking-tight tabular-nums text-navy">{current ? current.total_classes : '—'}</span>
+              {current && (
+                <span className="text-xs text-text-secondary">{showCurrentCycleClasses ? 'Hide classes ▲' : 'View classes ▼'}</span>
+              )}
+            </div>
+            {current && current.carried_forward_count > 0 && (
+              <div className="text-xs text-warning mt-1">
+                incl. ₹{current.carried_forward_amount} from {current.carried_forward_count} late-approved class{current.carried_forward_count === 1 ? '' : 'es'}
+              </div>
+            )}
+          </Card>
+        </button>
       </div>
+
+      {showCurrentCycleClasses && current && (
+        <>
+          <h2 className="text-lg font-semibold text-navy mb-3">
+            Classes taken ({formatDateRange(current.cycle_start, current.cycle_end)})
+          </h2>
+          <Card className="p-0 overflow-x-auto mb-8">
+            <table className="table">
+              <thead className="table-head-row">
+                <tr>
+                  <th className="table-head-cell">Date</th>
+                  <th className="table-head-cell">Student</th>
+                  <th className="table-head-cell">Course</th>
+                  <th className="table-head-cell">Topic</th>
+                  <th className="table-head-cell">Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!loadingCurrentCycleClasses && currentCycleClasses.map((a) => (
+                  <tr key={a.id} className="table-row">
+                    <td className="table-cell">
+                      {formatDate(a.date)}
+                      {isCarriedForward(a, current) && (
+                        <div className="text-xs text-warning">Carried forward</div>
+                      )}
+                    </td>
+                    <td className="table-cell">{a.student_name}</td>
+                    <td className="table-cell">{a.course_name}</td>
+                    <td className="table-cell text-text-secondary">{a.topic_covered || '—'}</td>
+                    <td className="table-cell tabular-nums">{a.trainer_rate != null ? `₹${a.trainer_rate}` : '—'}</td>
+                  </tr>
+                ))}
+                {loadingCurrentCycleClasses && (
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
+                )}
+                {!loadingCurrentCycleClasses && currentCycleClasses.length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">No classes found for this cycle.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </Card>
+        </>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
         <StatCard
@@ -165,22 +250,29 @@ export default function MyEarningsPage() {
                   <th className="table-head-cell">Student</th>
                   <th className="table-head-cell">Course</th>
                   <th className="table-head-cell">Topic</th>
+                  <th className="table-head-cell">Rate</th>
                 </tr>
               </thead>
               <tbody>
                 {!loadingLastCycleClasses && lastCycleClasses.map((a) => (
                   <tr key={a.id} className="table-row">
-                    <td className="table-cell">{formatDate(a.date)}</td>
+                    <td className="table-cell">
+                      {formatDate(a.date)}
+                      {isCarriedForward(a, lastCycle) && (
+                        <div className="text-xs text-warning">Carried forward</div>
+                      )}
+                    </td>
                     <td className="table-cell">{a.student_name}</td>
                     <td className="table-cell">{a.course_name}</td>
                     <td className="table-cell text-text-secondary">{a.topic_covered || '—'}</td>
+                    <td className="table-cell tabular-nums">{a.trainer_rate != null ? `₹${a.trainer_rate}` : '—'}</td>
                   </tr>
                 ))}
                 {loadingLastCycleClasses && (
-                  <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
                 )}
                 {!loadingLastCycleClasses && lastCycleClasses.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">No classes found for this cycle.</td></tr>
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">No classes found for this cycle.</td></tr>
                 )}
               </tbody>
             </table>
@@ -258,6 +350,30 @@ export default function MyEarningsPage() {
           </tbody>
         </table>
       </Card>
+
+      {payouts.length > 0 && (
+        <div className="flex items-center justify-between mt-3">
+          <p className="text-xs text-text-tertiary">
+            Showing {payouts.length} of {payoutsCount} payout{payoutsCount === 1 ? '' : 's'} loaded
+          </p>
+          <div className="flex gap-4">
+            {payoutsPage > 1 && (
+              <button onClick={loadLessPayouts} className="text-xs font-medium text-primary hover:underline focus-ring">
+                Load less
+              </button>
+            )}
+            {payoutsHasMore && (
+              <button
+                disabled={payoutsLoadingMore}
+                onClick={loadMorePayouts}
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
+              >
+                {payoutsLoadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

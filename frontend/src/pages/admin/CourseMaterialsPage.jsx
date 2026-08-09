@@ -6,14 +6,15 @@ import { Modal } from '../../components/Modal'
 import { SearchableSelect } from '../../components/SearchableSelect'
 import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
+import { usePickerSearch } from '../../hooks/usePickerSearch'
 import { formatDate } from '../../utils/date'
 
 const EMPTY_FORM = { course: '', title: '', description: '' }
 
 export default function CourseMaterialsPage() {
   const api = useApi()
+  const pickerSearch = usePickerSearch()
   const { auth } = useAuth()
-  const [courses, setCourses] = useState([])
   const [materials, setMaterials] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -28,8 +29,7 @@ export default function CourseMaterialsPage() {
 
   useEffect(() => {
     loadMaterials().catch((err) => setError(err.message))
-    api('/api/courses/').then(setCourses).catch(() => {})
-  }, [api, loadMaterials])
+  }, [loadMaterials])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -104,7 +104,7 @@ export default function CourseMaterialsPage() {
             placeholder="Search course…"
             value={form.course}
             onChange={(v) => setForm({ ...form, course: v })}
-            options={courses.map((c) => ({ value: c.id, label: c.name }))}
+            loadOptions={pickerSearch.courses}
           />
           <input required placeholder="Title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="input" />
           <textarea

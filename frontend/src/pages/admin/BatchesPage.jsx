@@ -7,6 +7,7 @@ import { Modal } from '../../components/Modal'
 import { SearchableSelect } from '../../components/SearchableSelect'
 import { useApi } from '../../hooks/useApi'
 import { usePaginatedList } from '../../hooks/usePaginatedList'
+import { usePickerSearch } from '../../hooks/usePickerSearch'
 import { formatDate } from '../../utils/date'
 import { DAY_OPTIONS, formatDays, formatTime } from '../../utils/schedule'
 
@@ -25,7 +26,7 @@ const EMPTY_FORM = {
 
 export default function BatchesPage() {
   const api = useApi()
-  const [courses, setCourses] = useState([])
+  const pickerSearch = usePickerSearch()
   const [trainers, setTrainers] = useState([])
   const [summary, setSummary] = useState(null)
   const [sourceBreakdown, setSourceBreakdown] = useState(null)
@@ -62,7 +63,6 @@ export default function BatchesPage() {
 
   useEffect(() => {
     loadSummary().catch((err) => setError(err.message))
-    api('/api/courses/').then(setCourses).catch(() => {})
     // Only used as autocomplete suggestions below — a batch trainer isn't required to be
     // a registered trainer, so this list doesn't restrict what can be typed/added.
     api('/api/trainers/').then((t) => setTrainers(t.filter((x) => x.status === 'active'))).catch(() => {})
@@ -191,7 +191,7 @@ export default function BatchesPage() {
             placeholder="Search course…"
             value={form.course}
             onChange={(v) => setForm({ ...form, course: v })}
-            options={courses.map((c) => ({ value: c.id, label: c.name }))}
+            loadOptions={pickerSearch.courses}
           />
           <input required type="number" min="1" placeholder="Total classes" value={form.total_classes} onChange={(e) => setForm({ ...form, total_classes: e.target.value })} className="input" />
           <input required type="number" step="0.01" min="0" placeholder="Fee per student (₹)" value={form.fee_per_student} onChange={(e) => setForm({ ...form, fee_per_student: e.target.value })} className="input" />

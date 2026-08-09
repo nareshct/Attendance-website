@@ -13,14 +13,32 @@ class AttendanceSerializer(serializers.ModelSerializer):
     in_closed_cycle = serializers.SerializerMethodField()
     approved_via_request = serializers.SerializerMethodField()
     topic_covered = serializers.CharField(required=True, allow_blank=False)
+    trainer_rate = serializers.SerializerMethodField()
 
     class Meta:
         model = Attendance
         fields = [
             'id', 'enrollment', 'student_name', 'course_name', 'date', 'status',
             'topic_covered', 'marked_by', 'marked_by_name', 'in_closed_cycle', 'approved_via_request',
+            'trainer_rate',
         ]
         read_only_fields = ['marked_by']
+
+    def get_trainer_rate(self, obj):
+        # What this specific class actually paid (or would pay) the trainer who marked
+        # it — mirrors billing.services.trainer_totals_for_range()'s own per-row
+        # resolution exactly: an enrollment-specific override first (see
+        # Enrollment.trainer_rate_per_class), else the rate in effect on the class's own
+        # date, else the trainer's live rate. Powers the rate column on the trainer's
+        # My Earnings "last cycle classes" list.
+        from billing.services import historical_rate
+
+        if obj.enrollment.trainer_rate_per_class is not None:
+            return obj.enrollment.trainer_rate_per_class
+        rate = historical_rate(obj.marked_by, obj.enrollment.course_id, obj.date)
+        if rate is None:
+            rate = obj.marked_by.rate_for(obj.enrollment.course)
+        return rate
 
     def get_in_closed_cycle(self, obj):
         # Annotated by the viewset's queryset for list/retrieve/update; only

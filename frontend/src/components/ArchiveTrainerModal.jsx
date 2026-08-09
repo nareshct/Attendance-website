@@ -3,6 +3,7 @@ import { Button } from './Button'
 import { Modal } from './Modal'
 import { SearchableSelect } from './SearchableSelect'
 import { useApi } from '../hooks/useApi'
+import { usePickerSearch } from '../hooks/usePickerSearch'
 import { formatDate, formatDateRange } from '../utils/date'
 import { formatDays, formatTime } from '../utils/schedule'
 
@@ -28,9 +29,9 @@ function removeName(trainerNames, name) {
 // see TrainerViewSet.archive) until every category clears.
 export function ArchiveTrainerModal({ open, trainerId, trainerName, onClose, onArchived }) {
   const api = useApi()
+  const pickerSearch = usePickerSearch()
   const [blockers, setBlockers] = useState(null)
   const [loadError, setLoadError] = useState('')
-  const [activeTrainers, setActiveTrainers] = useState([])
 
   const [transferTargets, setTransferTargets] = useState({})
   const [busyKey, setBusyKey] = useState('')
@@ -51,7 +52,6 @@ export function ArchiveTrainerModal({ open, trainerId, trainerName, onClose, onA
     setTransferTargets({})
     setBlockers(null)
     refreshBlockers().catch((err) => setLoadError(err.message))
-    api('/api/trainers/').then(setActiveTrainers).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, trainerId])
 
@@ -124,9 +124,9 @@ export function ArchiveTrainerModal({ open, trainerId, trainerName, onClose, onA
     }
   }
 
-  const trainerOptions = activeTrainers
-    .filter((t) => t.status === 'active' && t.id !== trainerId)
-    .map((t) => ({ value: t.id, label: t.name }))
+  // The trainer being archived is excluded from the transfer target list — they're
+  // active, and about to stop being, but can't obviously take over their own work.
+  const loadTransferTargets = (query) => pickerSearch.trainers(query).then((ts) => ts.filter((t) => t.id !== trainerId))
 
   const b = blockers || EMPTY_BLOCKERS
   const isClear = blockers != null && Object.values(b).every((list) => list.length === 0)
@@ -163,7 +163,7 @@ export function ArchiveTrainerModal({ open, trainerId, trainerName, onClose, onA
                         <div className="flex-1 max-w-xs">
                           <SearchableSelect
                             placeholder="Transfer to…"
-                            options={trainerOptions}
+                            loadOptions={loadTransferTargets}
                             value={transferTargets[e.id] || ''}
                             onChange={(v) => setTransferTargets((prev) => ({ ...prev, [e.id]: v }))}
                           />

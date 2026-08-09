@@ -119,7 +119,7 @@ def trainer_totals_for_range(trainer, start, end, as_of=None):
             date__lte=end,
             payout_adjustment__isnull=True,
         )
-        .values('enrollment__course', 'date')
+        .values('enrollment__course', 'enrollment__trainer_rate_per_class', 'date')
         .annotate(count=Count('id'))
     )
 
@@ -136,9 +136,15 @@ def trainer_totals_for_range(trainer, start, end, as_of=None):
         count = row['count']
         price_date = as_of if as_of is not None else row['date']
 
-        rate = historical_rate(trainer, course_id, price_date)
+        # An enrollment-specific rate (set on the enrollment form) always wins over the
+        # trainer's own course rate — see Enrollment.trainer_rate_per_class. Applies to
+        # whoever actually taught the class (the enrollment's own trainer or a
+        # substitute), since it prices the batch, not the trainer.
+        rate = row['enrollment__trainer_rate_per_class']
         if rate is None:
-            rate = overrides.get(course_id, default_rate)
+            rate = historical_rate(trainer, course_id, price_date)
+            if rate is None:
+                rate = overrides.get(course_id, default_rate)
 
         total_classes += count
         total_amount += rate * count
@@ -164,6 +170,7 @@ def current_cycle_summary(trainer):
     adjustment_count = adjustments.count()
 
     return {
+        'cycle_id': cycle.id,
         'cycle_start': start,
         'cycle_end': end,
         'total_classes': total_classes + adjustment_count,
@@ -314,7 +321,8 @@ def b2c_totals_for_range(start, end, as_of=None):
     client_totals()'s `as_of` for why a single as_of date would be wrong for a
     range that can cross a rate change.
     """
-    group_fields = ['marked_by', 'enrollment__course'] if as_of is not None else ['marked_by', 'enrollment__course', 'date']
+    group_fields = ['marked_by', 'enrollment__course', 'enrollment__trainer_rate_per_class']
+    group_fields += [] if as_of is not None else ['date']
     rows = (
         Attendance.objects.filter(
             status='present',
@@ -347,9 +355,12 @@ def b2c_totals_for_range(start, end, as_of=None):
         trainer = trainers[trainer_id]
         price_date = as_of if as_of is not None else row['date']
 
-        trainer_rate = historical_rate(trainer, course_id, price_date)
+        # See trainer_totals_for_range() — an enrollment-specific rate always wins.
+        trainer_rate = row['enrollment__trainer_rate_per_class']
         if trainer_rate is None:
-            trainer_rate = trainer_overrides.get((trainer_id, course_id), trainer.default_rate_per_class or Decimal('0.00'))
+            trainer_rate = historical_rate(trainer, course_id, price_date)
+            if trainer_rate is None:
+                trainer_rate = trainer_overrides.get((trainer_id, course_id), trainer.default_rate_per_class or Decimal('0.00'))
         course_rate = historical_rate(courses_by_id[course_id], None, price_date)
         if course_rate is None:
             course_rate = course_rates.get(course_id, Decimal('0.00'))

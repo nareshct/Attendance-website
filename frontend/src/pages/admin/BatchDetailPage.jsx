@@ -10,6 +10,7 @@ import { SearchableSelect } from '../../components/SearchableSelect'
 import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { usePaginatedList } from '../../hooks/usePaginatedList'
+import { usePickerSearch } from '../../hooks/usePickerSearch'
 import { formatDate } from '../../utils/date'
 import { DAY_OPTIONS, formatDays, formatTime } from '../../utils/schedule'
 
@@ -23,14 +24,13 @@ const PAYMENT_TYPE_OPTIONS = [
 export default function BatchDetailPage() {
   const { id } = useParams()
   const api = useApi()
+  const pickerSearch = usePickerSearch()
   const navigate = useNavigate()
   const { auth } = useAuth()
   const [batch, setBatch] = useState(null)
   const [revenue, setRevenue] = useState(null)
   const [sessions, setSessions] = useState([])
   const [payouts, setPayouts] = useState([])
-  const [students, setStudents] = useState([])
-  const [courses, setCourses] = useState([])
   const [trainers, setTrainers] = useState([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -123,8 +123,6 @@ export default function BatchDetailPage() {
     loadRevenue().catch((err) => setError(err.message))
     loadSessions().catch((err) => setError(err.message))
     loadPayouts().catch((err) => setError(err.message))
-    api('/api/students/').then((s) => setStudents(s.filter((x) => x.status === 'active'))).catch(() => {})
-    api('/api/courses/').then(setCourses).catch(() => {})
     // Only used as autocomplete suggestions below — a batch trainer isn't required to be
     // a registered trainer, so this list doesn't restrict what can be typed/added.
     api('/api/trainers/').then((t) => setTrainers(t.filter((x) => x.status === 'active'))).catch(() => {})
@@ -230,8 +228,15 @@ export default function BatchDetailPage() {
     await Promise.all([reloadEnrollments(), loadRevenue()])
   }
 
+  // Students already in this batch are excluded from the "add student" picker below —
+  // note this only excludes whatever page of `enrollments` is currently loaded (see
+  // usePaginatedList), same trade-off as every other search-while-loaded list in this
+  // app; a student added while an earlier page is still showing wouldn't be excluded
+  // until "Load more" catches up.
   const alreadyEnrolledIds = new Set(enrollments.map((e) => e.student))
-  const availableStudents = students.filter((s) => !alreadyEnrolledIds.has(s.id))
+  function loadAvailableStudents(query) {
+    return pickerSearch.students(query).then((ss) => ss.filter((s) => !alreadyEnrolledIds.has(s.id)))
+  }
 
   const [studentStatusFilter, setStudentStatusFilter] = useState('all')
   const [studentPaymentFilter, setStudentPaymentFilter] = useState('all')
@@ -639,8 +644,9 @@ export default function BatchDetailPage() {
               required
               placeholder="Search course…"
               value={batchForm.course}
+              selectedLabel={batch?.course_name}
               onChange={(v) => setBatchForm({ ...batchForm, course: v })}
-              options={courses.map((c) => ({ value: c.id, label: c.name }))}
+              loadOptions={pickerSearch.courses}
             />
             <select value={batchForm.status} onChange={(e) => setBatchForm({ ...batchForm, status: e.target.value })} className="input">
               <option value="ongoing">Ongoing</option>
@@ -1022,7 +1028,7 @@ export default function BatchDetailPage() {
               placeholder="Search student…"
               value={addStudentId}
               onChange={setAddStudentId}
-              options={availableStudents.map((s) => ({ value: s.id, label: `${s.name} (${s.student_id})` }))}
+              loadOptions={loadAvailableStudents}
             />
           ) : (
             <>

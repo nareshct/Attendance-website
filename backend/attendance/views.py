@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Exists, F, OuterRef
+from django.db.models import Exists, F, OuterRef, Q
 from django.db.models.functions import Greatest
 from django.utils import timezone
 from rest_framework import status
@@ -72,14 +72,31 @@ class AttendanceViewSet(ModelViewSet):
         # every page that used to fetch this endpoint unbounded.
         start = self.request.query_params.get('start')
         end = self.request.query_params.get('end')
+        # A late-approved class keeps its own (earlier, already-closed-cycle) date —
+        # only its *earnings* move to whatever cycle was open when it got approved (see
+        # PayoutAdjustment). So a plain start/end window naturally excludes it even
+        # though its payout amount is credited to that cycle. Pass this to also pull in
+        # any attendance carried forward into cycle `carried_forward_cycle` — used by the
+        # trainer's My Earnings and the admin Payouts page's per-cycle class breakdown,
+        # so a cycle's classes list matches what it actually paid.
+        carried_forward_cycle = self.request.query_params.get('carried_forward_cycle')
         if trainer_id and user.is_staff:
             qs = qs.filter(marked_by_id=trainer_id)
         if date:
             qs = qs.filter(date=date)
-        if start:
-            qs = qs.filter(date__gte=start)
-        if end:
-            qs = qs.filter(date__lte=end)
+        if start or end or carried_forward_cycle:
+            window_q = None
+            if start or end:
+                window_q = Q()
+                if start:
+                    window_q &= Q(date__gte=start)
+                if end:
+                    window_q &= Q(date__lte=end)
+            if carried_forward_cycle:
+                carried_q = Q(payout_adjustment__applied_cycle_id=carried_forward_cycle)
+                qs = qs.filter(window_q | carried_q if window_q is not None else carried_q)
+            else:
+                qs = qs.filter(window_q)
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -268,14 +285,17 @@ class AttendanceRequestViewSet(ReadOnlyModelViewSet):
             if cycle:
                 current_cycle, _ = get_or_create_cycle()
 
-                # Bill this class at the rate that was actually in effect on
-                # req.date, not whatever the rate happens to be today — a rate
-                # change made after this class's own cycle already closed
-                # shouldn't retroactively reprice a class taught before it.
+                # An enrollment-specific rate (set on the enrollment form) always wins —
+                # see Enrollment.trainer_rate_per_class. Otherwise, bill this class at the
+                # rate that was actually in effect on req.date, not whatever the rate
+                # happens to be today — a rate change made after this class's own cycle
+                # already closed shouldn't retroactively reprice a class taught before it.
                 # Falls back to the live rate if it's never changed.
-                trainer_rate = historical_rate(req.requested_by, req.enrollment.course, req.date)
+                trainer_rate = req.enrollment.trainer_rate_per_class
                 if trainer_rate is None:
-                    trainer_rate = req.requested_by.rate_for(req.enrollment.course) or Decimal('0.00')
+                    trainer_rate = historical_rate(req.requested_by, req.enrollment.course, req.date)
+                    if trainer_rate is None:
+                        trainer_rate = req.requested_by.rate_for(req.enrollment.course) or Decimal('0.00')
 
                 PayoutAdjustment.objects.create(
                     trainer=req.requested_by,
@@ -303,9 +323,11 @@ class AttendanceRequestViewSet(ReadOnlyModelViewSet):
                         applied_cycle=current_cycle,
                     )
                 elif student.client is not None:
-                    client_rate = historical_rate(student.client, req.enrollment.course, req.date)
+                    client_rate = req.enrollment.client_rate_per_class
                     if client_rate is None:
-                        client_rate = student.client.rate_for(req.enrollment.course) or Decimal('0.00')
+                        client_rate = historical_rate(student.client, req.enrollment.course, req.date)
+                        if client_rate is None:
+                            client_rate = student.client.rate_for(req.enrollment.course) or Decimal('0.00')
                     ClientInvoiceAdjustment.objects.create(
                         client=student.client,
                         attendance=attendance,

@@ -1,4 +1,5 @@
 from django.http import FileResponse
+from rest_framework import filters
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.viewsets import ModelViewSet
@@ -12,6 +13,12 @@ from .serializers import CourseMaterialSerializer, CourseSerializer, TrainerCour
 class CourseViewSet(ModelViewSet):
     queryset = Course.objects.all().order_by('name')
     serializer_class = CourseSerializer
+    # ?search= matches course name (case-insensitive substring) — same server-side search
+    # pattern as TrainerViewSet/StudentViewSet, used by async-search course pickers (see
+    # SearchableSelect). The course catalog itself is small enough that this is mostly
+    # for consistency rather than a real scaling need.
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name']
     # No DELETE — courses are referenced by enrollments/payment plans and are never
     # hard-deleted.
     http_method_names = ['get', 'post', 'put', 'patch', 'head', 'options']

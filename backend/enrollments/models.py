@@ -28,6 +28,17 @@ class Enrollment(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='ongoing')
     class_time = models.TimeField(null=True, blank=True)
     class_days = models.CharField(max_length=50, blank=True, default='', help_text='Comma-separated day codes, e.g. MON,WED,FRI')
+    # Snapshots of the trainer's/client's per-class rate at enrollment time, for display
+    # on the enrollment record only. Payout and billing math never reads these — they
+    # always use billing.RateHistory (effective-dated) or the trainer's/client's live
+    # rate — since a single enrollment can span rate changes over its lifetime. See
+    # attendance/views.py, clients/services.py and billing/services.py.
+    trainer_rate_per_class = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)],
+    )
+    client_rate_per_class = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)],
+    )
 
     class Meta:
         # find_schedule_conflict() filters on exactly this combination (trainer,

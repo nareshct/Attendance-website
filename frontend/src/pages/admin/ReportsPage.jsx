@@ -4,15 +4,26 @@ import { Card } from '../../components/Card'
 import { SearchableSelect } from '../../components/SearchableSelect'
 import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
+import { usePickerSearch } from '../../hooks/usePickerSearch'
 import { formatDateRange } from '../../utils/date'
+
+// Reports can cover an archived trainer's/client's historical activity too, so these
+// pickers search every status, not just active — unlike most other trainer/client
+// pickers in the app, which default to active-only.
+function loadAllTrainers(pickerSearch, query) {
+  return pickerSearch.trainers(query, { status: '' }).then((ts) => (query ? ts : [{ value: '', label: 'All trainers' }, ...ts]))
+}
+
+function loadAllClients(pickerSearch, query) {
+  return pickerSearch.clients(query, { status: '' })
+}
 
 export default function ReportsPage() {
   const api = useApi()
+  const pickerSearch = usePickerSearch()
   const { auth } = useAuth()
 
-  const [trainers, setTrainers] = useState([])
   const [cycles, setCycles] = useState([])
-  const [clients, setClients] = useState([])
 
   const [payoutFilters, setPayoutFilters] = useState({ trainer: '', cycle: '' })
   const [selectedClient, setSelectedClient] = useState('')
@@ -23,9 +34,7 @@ export default function ReportsPage() {
   const [busy, setBusy] = useState('')
 
   useEffect(() => {
-    api('/api/trainers/').then(setTrainers).catch(() => {})
     api('/api/billing-cycles/').then(setCycles).catch(() => {})
-    api('/api/clients/').then(setClients).catch(() => {})
   }, [api])
 
   async function handleDownload(key, path) {
@@ -56,7 +65,7 @@ export default function ReportsPage() {
               placeholder="All trainers"
               value={payoutFilters.trainer}
               onChange={(v) => setPayoutFilters({ ...payoutFilters, trainer: v })}
-              options={[{ value: '', label: 'All trainers' }, ...trainers.map((t) => ({ value: t.id, label: t.name }))]}
+              loadOptions={(q) => loadAllTrainers(pickerSearch, q)}
             />
             <SearchableSelect
               placeholder="All cycles"
@@ -90,7 +99,7 @@ export default function ReportsPage() {
               placeholder="All trainers"
               value={attendanceReportFilters.trainer}
               onChange={(v) => setAttendanceReportFilters({ ...attendanceReportFilters, trainer: v })}
-              options={[{ value: '', label: 'All trainers' }, ...trainers.map((t) => ({ value: t.id, label: t.name }))]}
+              loadOptions={(q) => loadAllTrainers(pickerSearch, q)}
             />
             <div className="flex flex-wrap items-center gap-2">
               <input
@@ -131,7 +140,7 @@ export default function ReportsPage() {
               placeholder="Search client…"
               value={selectedClient}
               onChange={setSelectedClient}
-              options={clients.map((c) => ({ value: c.id, label: c.company_name }))}
+              loadOptions={(q) => loadAllClients(pickerSearch, q)}
             />
           </div>
           <button

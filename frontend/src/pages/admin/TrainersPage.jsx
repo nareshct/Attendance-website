@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArchiveTrainerModal } from '../../components/ArchiveTrainerModal'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Modal } from '../../components/Modal'
 import { useApi } from '../../hooks/useApi'
+import { usePaginatedList } from '../../hooks/usePaginatedList'
 
 const EMPTY_FORM = { name: '', phone_number: '', place: '', username: '', password: '', default_rate_per_class: '' }
 
 export default function TrainersPage() {
   const api = useApi()
-  const [trainers, setTrainers] = useState([])
   const [courses, setCourses] = useState([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -21,11 +21,6 @@ export default function TrainersPage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const loadTrainers = useCallback(async () => {
-    const path = debouncedSearch ? `/api/trainers/?search=${encodeURIComponent(debouncedSearch)}` : '/api/trainers/'
-    setTrainers(await api(path))
-  }, [api, debouncedSearch])
-
   // Debounced so rapid typing doesn't fire a request per keystroke — the actual search
   // runs server-side (see TrainerViewSet.search_fields), so it always covers every
   // trainer regardless of how many pages have been loaded.
@@ -33,6 +28,12 @@ export default function TrainersPage() {
     const timer = setTimeout(() => setDebouncedSearch(search), 300)
     return () => clearTimeout(timer)
   }, [search])
+
+  const trainersPath = debouncedSearch ? `/api/trainers/?search=${encodeURIComponent(debouncedSearch)}` : '/api/trainers/'
+  const {
+    items: trainers, count: trainersCount, hasMore, loading, loadingMore,
+    reload: loadTrainers, loadMore, loadLess, page,
+  } = usePaginatedList(trainersPath)
 
   useEffect(() => {
     loadTrainers().catch((err) => setError(err.message))
@@ -42,8 +43,8 @@ export default function TrainersPage() {
     api('/api/courses/').then(setCourses).catch(() => {})
   }, [api])
 
-  // Search is already applied server-side (see loadTrainers above) — this only layers
-  // the status tab on top of the already-matching results.
+  // Search is already applied server-side (see trainersPath above) — this only layers
+  // the status tab on top of the already-loaded results.
   const filtered = trainers.filter((t) => t.status === statusTab)
 
   function updateRate(index, field, value) {
@@ -224,12 +225,40 @@ export default function TrainersPage() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {!loading && filtered.length === 0 && (
               <tr><td colSpan={8} className="px-4 py-6 text-center text-text-tertiary">No trainers found.</td></tr>
+            )}
+            {loading && (
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
             )}
           </tbody>
         </table>
       </Card>
+
+      {!loading && trainers.length > 0 && (
+        <div className="flex items-center justify-between mt-3">
+          <p className="text-xs text-text-tertiary">
+            Showing {filtered.length} {statusTab} trainer{filtered.length === 1 ? '' : 's'}
+            {hasMore && ` (${trainers.length} of ${trainersCount} loaded overall — the status tab only applies to what's loaded)`}
+          </p>
+          <div className="flex gap-4">
+            {page > 1 && (
+              <button onClick={loadLess} className="text-xs font-medium text-primary hover:underline focus-ring">
+                Load less
+              </button>
+            )}
+            {hasMore && (
+              <button
+                disabled={loadingMore}
+                onClick={loadMore}
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
+              >
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <ArchiveTrainerModal
         open={Boolean(archiveTarget)}

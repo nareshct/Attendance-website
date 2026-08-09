@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { downloadFile } from '../../api/client'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
@@ -6,22 +6,36 @@ import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
-import { formatDateRange } from '../../utils/date'
+import { usePaginatedList } from '../../hooks/usePaginatedList'
+import { formatDate, formatDateRange } from '../../utils/date'
 
 export default function PayoutsPage() {
   const api = useApi()
   const { auth } = useAuth()
   const [cycles, setCycles] = useState([])
-  const [payouts, setPayouts] = useState([])
   const [currentPayouts, setCurrentPayouts] = useState({})
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [showAllCycles, setShowAllCycles] = useState(false)
 
-  const loadAll = useCallback(async () => {
-    const [c, p] = await Promise.all([api('/api/billing-cycles/'), api('/api/payouts/')])
+  // Which one (cycle, trainer) row's class breakdown is expanded — only one at a time,
+  // same accordion approach as the trainer's own My Earnings page's "view classes".
+  // Keyed as "cycleId:trainerId" since the same trainer can appear in several cycles.
+  const [expandedPayout, setExpandedPayout] = useState(null)
+  const [payoutClasses, setPayoutClasses] = useState([])
+  const [loadingPayoutClasses, setLoadingPayoutClasses] = useState(false)
+
+  // Same paginated "Load more"/"Load less" pattern as the Students/Trainers/Clients/
+  // Enrollments pages — /api/payouts/ is paginated server-side (see DEFAULT_PAGINATION_CLASS
+  // in backend/config/settings.py), so an unbounded fetch here would eventually hit
+  // unwrapPaginated()'s fail-loud guard once payouts passed one page.
+  const {
+    items: payouts, count: payoutsCount, hasMore: payoutsHasMore, loadingMore: payoutsLoadingMore,
+    reload: loadPayouts, loadMore: loadMorePayouts, loadLess: loadLessPayouts, page: payoutsPage,
+  } = usePaginatedList('/api/payouts/')
+
+  const loadCycles = useCallback(async () => {
+    const c = await api('/api/billing-cycles/')
     setCycles(c)
-    setPayouts(p)
 
     const openCycles = c.filter((cycle) => cycle.status === 'open')
     const previews = await Promise.all(
@@ -33,6 +47,11 @@ export default function PayoutsPage() {
     })
     setCurrentPayouts(previewsByCycle)
   }, [api])
+
+  const loadAll = useCallback(
+    () => Promise.all([loadCycles(), loadPayouts()]),
+    [loadCycles, loadPayouts],
+  )
 
   useEffect(() => {
     loadAll().catch((err) => setError(err.message))
@@ -118,6 +137,26 @@ export default function PayoutsPage() {
     }
   }
 
+  async function toggleClasses(cycle, trainerId) {
+    const key = `${cycle.id}:${trainerId}`
+    if (expandedPayout === key) {
+      setExpandedPayout(null)
+      return
+    }
+    setExpandedPayout(key)
+    setLoadingPayoutClasses(true)
+    setError('')
+    try {
+      setPayoutClasses(await api(
+        `/api/attendance/?trainer=${trainerId}&start=${cycle.cycle_start}&end=${cycle.cycle_end}&carried_forward_cycle=${cycle.id}`
+      ))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoadingPayoutClasses(false)
+    }
+  }
+
   async function handleExport() {
     setBusy(true)
     setError('')
@@ -141,19 +180,12 @@ export default function PayoutsPage() {
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-navy">Billing cycles &amp; payouts</h2>
-        <div className="flex items-center gap-4">
-          {cycles.length > 3 && (
-            <button onClick={() => setShowAllCycles((v) => !v)} className="text-xs font-medium text-primary hover:underline focus-ring">
-              {showAllCycles ? 'Show recent only' : `Show all (${cycles.length})`}
-            </button>
-          )}
-          <button disabled={busy} onClick={handleExport} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
-            Export CSV
-          </button>
-        </div>
+        <button disabled={busy} onClick={handleExport} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
+          Export CSV
+        </button>
       </div>
 
-      {(showAllCycles ? cycles : cycles.slice(0, 3)).map((c) => {
+      {cycles.map((c) => {
         const isOpen = c.status === 'open'
         const cyclePayouts = isOpen ? (currentPayouts[c.id] || []) : payouts.filter((p) => p.cycle === c.id)
         return (
@@ -186,31 +218,87 @@ export default function PayoutsPage() {
                 </tr>
               </thead>
               <tbody>
-                {cyclePayouts.map((p) => (
-                  <tr key={isOpen ? p.trainer : p.id} className="table-row">
-                    <td className="table-cell">{p.trainer_name}</td>
-                    <td className="table-cell tabular-nums">{p.total_classes}</td>
-                    <td className="table-cell tabular-nums">
-                      ₹{p.total_amount}
-                      {Number(p.carried_forward_amount) > 0 && (
-                        <div className="text-xs text-text-tertiary">(incl. ₹{p.carried_forward_amount} carried forward)</div>
-                      )}
-                    </td>
-                    <td className="table-cell">{isOpen ? <Badge status="open" /> : <Badge status={p.paid_status} />}</td>
-                    <td className="table-cell text-right">
-                      {!isOpen && p.paid_status === 'pending' && (
-                        <div className="flex items-center justify-end gap-3">
-                          <button disabled={busy} onClick={() => handleMarkPaid(p.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
-                            Mark as paid
+                {cyclePayouts.map((p) => {
+                  const rowKey = `${c.id}:${p.trainer}`
+                  const expanded = expandedPayout === rowKey
+                  // No date-range filter — the API call already scopes this to exactly
+                  // the right set, including any carried-forward classes whose own date
+                  // falls outside this cycle's own range (see AttendanceViewSet's
+                  // carried_forward_cycle param).
+                  const classes = expanded
+                    ? [...payoutClasses].sort((a, b) => a.date.localeCompare(b.date))
+                    : []
+                  return (
+                    <Fragment key={rowKey}>
+                      <tr className="table-row">
+                        <td className="table-cell">{p.trainer_name}</td>
+                        <td className="table-cell tabular-nums">
+                          <button onClick={() => toggleClasses(c, p.trainer)} className="hover:underline focus-ring">
+                            {p.total_classes} {expanded ? '▲' : '▼'}
                           </button>
-                          <button disabled={busy} onClick={() => handleCancelPayout(p.id)} className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring">
-                            Cancel
-                          </button>
-                        </div>
+                        </td>
+                        <td className="table-cell tabular-nums">
+                          ₹{p.total_amount}
+                          {Number(p.carried_forward_amount) > 0 && (
+                            <div className="text-xs text-text-tertiary">(incl. ₹{p.carried_forward_amount} carried forward)</div>
+                          )}
+                        </td>
+                        <td className="table-cell">{isOpen ? <Badge status="open" /> : <Badge status={p.paid_status} />}</td>
+                        <td className="table-cell text-right">
+                          {!isOpen && p.paid_status === 'pending' && (
+                            <div className="flex items-center justify-end gap-3">
+                              <button disabled={busy} onClick={() => handleMarkPaid(p.id)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
+                                Mark as paid
+                              </button>
+                              <button disabled={busy} onClick={() => handleCancelPayout(p.id)} className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring">
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr className="table-row bg-surface-sunken">
+                          <td colSpan={5} className="p-0">
+                            <table className="table">
+                              <thead className="table-head-row">
+                                <tr>
+                                  <th className="table-head-cell">Date</th>
+                                  <th className="table-head-cell">Student</th>
+                                  <th className="table-head-cell">Course</th>
+                                  <th className="table-head-cell">Topic</th>
+                                  <th className="table-head-cell">Rate</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {!loadingPayoutClasses && classes.map((a) => (
+                                  <tr key={a.id} className="table-row">
+                                    <td className="table-cell">
+                                      {formatDate(a.date)}
+                                      {(a.date < c.cycle_start || a.date > c.cycle_end) && (
+                                        <div className="text-xs text-warning">Carried forward</div>
+                                      )}
+                                    </td>
+                                    <td className="table-cell">{a.student_name}</td>
+                                    <td className="table-cell">{a.course_name}</td>
+                                    <td className="table-cell text-text-secondary">{a.topic_covered || '—'}</td>
+                                    <td className="table-cell tabular-nums">{a.trainer_rate != null ? `₹${a.trainer_rate}` : '—'}</td>
+                                  </tr>
+                                ))}
+                                {loadingPayoutClasses && (
+                                  <tr><td colSpan={5} className="px-4 py-4 text-center text-text-tertiary">Loading…</td></tr>
+                                )}
+                                {!loadingPayoutClasses && classes.length === 0 && (
+                                  <tr><td colSpan={5} className="px-4 py-4 text-center text-text-tertiary">No classes found for this cycle.</td></tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  )
+                })}
                 {cyclePayouts.length === 0 && (
                   <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">
                     {isOpen ? 'No attendance marked yet in this cycle.' : 'No payouts for this cycle.'}
@@ -223,6 +311,31 @@ export default function PayoutsPage() {
       })}
       {cycles.length === 0 && (
         <Card className="p-6 text-center text-text-tertiary">No billing cycles yet.</Card>
+      )}
+
+      {payouts.length > 0 && (
+        <div className="flex items-center justify-between mt-3">
+          <p className="text-xs text-text-tertiary">
+            Showing {payouts.length} of {payoutsCount} payout{payoutsCount === 1 ? '' : 's'} loaded
+            {payoutsHasMore && ' — closed cycles further back may not be showing their payouts yet'}
+          </p>
+          <div className="flex gap-4">
+            {payoutsPage > 1 && (
+              <button onClick={loadLessPayouts} className="text-xs font-medium text-primary hover:underline focus-ring">
+                Load less
+              </button>
+            )}
+            {payoutsHasMore && (
+              <button
+                disabled={payoutsLoadingMore}
+                onClick={loadMorePayouts}
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
+              >
+                {payoutsLoadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </div>
+        </div>
       )}
 
       <ConfirmDialog

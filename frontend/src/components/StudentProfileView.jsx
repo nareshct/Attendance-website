@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { downloadFile } from '../api/client'
 import { useAuth } from '../hooks/useAuth'
 import { useApi } from '../hooks/useApi'
+import { usePickerSearch } from '../hooks/usePickerSearch'
 import { formatDate, formatWeekday } from '../utils/date'
 import { formatDays, formatTime } from '../utils/schedule'
 import { Badge } from './Badge'
@@ -16,13 +17,13 @@ const GRADES = Array.from({ length: 10 }, (_, i) => String(i + 3)) // std 3-12
 
 export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer = false, allowEdit = false }) {
   const api = useApi()
+  const pickerSearch = usePickerSearch()
   const { auth } = useAuth()
   const [profile, setProfile] = useState(null)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState(null)
   const [sessionsByEnrollment, setSessionsByEnrollment] = useState({})
   const [loadingSessions, setLoadingSessions] = useState(null)
-  const [trainers, setTrainers] = useState([])
   const [transferId, setTransferId] = useState(null)
   const [transferTrainer, setTransferTrainer] = useState('')
   const [transferring, setTransferring] = useState(false)
@@ -60,12 +61,6 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
   useEffect(() => {
     loadProfile().catch((err) => setError(err.message))
   }, [loadProfile])
-
-  useEffect(() => {
-    if (allowTransfer) {
-      api('/api/trainers/').then((t) => setTrainers(t.filter((x) => x.status === 'active'))).catch(() => {})
-    }
-  }, [api, allowTransfer])
 
   useEffect(() => {
     if (allowEdit) {
@@ -461,7 +456,7 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
                 placeholder="Search trainer…"
                 value={transferTrainer}
                 onChange={setTransferTrainer}
-                options={trainers.filter((t) => t.id !== transferTarget.trainer).map((t) => ({ value: t.id, label: t.name }))}
+                loadOptions={(q) => pickerSearch.trainers(q).then((ts) => ts.filter((t) => t.id !== transferTarget.trainer))}
               />
               {transferError && <p className="text-error text-xs">{transferError}</p>}
               <div className="flex justify-end gap-3">

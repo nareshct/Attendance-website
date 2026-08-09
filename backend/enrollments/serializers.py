@@ -59,6 +59,10 @@ class PaymentPlanSerializer(serializers.ModelSerializer):
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.name', read_only=True)
+    # Lets the frontend decide things like "show a refund field" (B2C-only) without
+    # needing the whole student list loaded just to look this one flag up — see
+    # EnrollmentsPage.jsx's withdraw modal.
+    student_source_type = serializers.CharField(source='student.source_type', read_only=True)
     course_name = serializers.CharField(source='course.name', read_only=True)
     trainer_name = serializers.CharField(source='trainer.name', read_only=True)
 
@@ -80,9 +84,10 @@ class EnrollmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Enrollment
         fields = [
-            'id', 'student', 'student_name', 'course', 'course_name', 'trainer', 'trainer_name',
+            'id', 'student', 'student_name', 'student_source_type', 'course', 'course_name', 'trainer', 'trainer_name',
             'batch_number', 'classes_completed', 'classes_total', 'start_date', 'status',
             'class_time', 'class_days', 'payment_type', 'discount_percent',
+            'trainer_rate_per_class', 'client_rate_per_class',
         ]
         read_only_fields = ['batch_number', 'classes_completed', 'status', 'start_date']
         extra_kwargs = {
@@ -148,6 +153,11 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             )
 
         student = attrs.get('student') or getattr(self.instance, 'student', None)
+
+        client_rate_per_class = attrs.get('client_rate_per_class')
+        if client_rate_per_class is not None and (student is None or student.source_type != 'B2B'):
+            raise serializers.ValidationError('Client rate is only valid for B2B students.')
+
         payment_type = attrs.get('payment_type')
         # Payment plan fields are only meaningful — and only required — when creating a
         # new B2C enrollment. An update (e.g. editing class_time) shouldn't have to
@@ -183,6 +193,16 @@ class EnrollmentSerializer(serializers.ModelSerializer):
 
         if not validated_data.get('classes_total'):
             validated_data['classes_total'] = validated_data['course'].total_classes
+
+        # Both rates default to the trainer's/client's current rate for this course when
+        # not explicitly overridden on the form — a display snapshot only (see the model
+        # field comments), not consulted by payout/billing.
+        if validated_data.get('trainer_rate_per_class') is None:
+            validated_data['trainer_rate_per_class'] = validated_data['trainer'].rate_for(validated_data['course'])
+        if validated_data['student'].source_type == 'B2B' and validated_data.get('client_rate_per_class') is None:
+            client = validated_data['student'].client
+            if client is not None:
+                validated_data['client_rate_per_class'] = client.rate_for(validated_data['course'])
 
         existing = Enrollment.objects.filter(
             student=validated_data['student'], course=validated_data['course']

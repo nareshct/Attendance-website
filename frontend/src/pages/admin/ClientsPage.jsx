@@ -5,12 +5,12 @@ import { Button } from '../../components/Button'
 import { Card, StatCard } from '../../components/Card'
 import { Modal } from '../../components/Modal'
 import { useApi } from '../../hooks/useApi'
+import { usePaginatedList } from '../../hooks/usePaginatedList'
 
 const EMPTY_FORM = { company_name: '', contact_phone: '', contact_email: '', rate_per_class: '' }
 
 export default function ClientsPage() {
   const api = useApi()
-  const [clients, setClients] = useState([])
   const [summary, setSummary] = useState(null)
   const [search, setSearch] = useState('')
   const [statusTab, setStatusTab] = useState('active')
@@ -19,9 +19,13 @@ export default function ClientsPage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const loadClients = useCallback(async () => {
-    setClients(await api('/api/clients/'))
-  }, [api])
+  // ClientViewSet has no server-side search, so — same trade-off documented in
+  // usePaginatedList — the search box below only searches what's been loaded so far,
+  // not the whole list, until "Load more" pulls in more.
+  const {
+    items: clients, count: clientsCount, hasMore, loading, loadingMore,
+    reload: loadClients, loadMore, loadLess, page,
+  } = usePaginatedList('/api/clients/')
 
   const loadSummary = useCallback(() => {
     return api('/api/clients/summary/').then(setSummary)
@@ -163,12 +167,40 @@ export default function ClientsPage() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {!loading && filtered.length === 0 && (
               <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">No clients found.</td></tr>
+            )}
+            {loading && (
+              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
             )}
           </tbody>
         </table>
       </Card>
+
+      {!loading && clients.length > 0 && (
+        <div className="flex items-center justify-between mt-3">
+          <p className="text-xs text-text-tertiary">
+            Showing {filtered.length} {statusTab} client{filtered.length === 1 ? '' : 's'}
+            {hasMore && ` (${clients.length} of ${clientsCount} loaded overall — search and the status tab only apply to what's loaded)`}
+          </p>
+          <div className="flex gap-4">
+            {page > 1 && (
+              <button onClick={loadLess} className="text-xs font-medium text-primary hover:underline focus-ring">
+                Load less
+              </button>
+            )}
+            {hasMore && (
+              <button
+                disabled={loadingMore}
+                onClick={loadMore}
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
+              >
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <ArchiveClientModal
         open={Boolean(archiveTarget)}

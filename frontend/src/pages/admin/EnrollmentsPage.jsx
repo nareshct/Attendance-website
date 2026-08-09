@@ -7,6 +7,7 @@ import { Modal } from '../../components/Modal'
 import { SearchableSelect } from '../../components/SearchableSelect'
 import { useApi } from '../../hooks/useApi'
 import { usePaginatedList } from '../../hooks/usePaginatedList'
+import { usePickerSearch } from '../../hooks/usePickerSearch'
 import { formatDate, formatDateRange } from '../../utils/date'
 import { DAY_OPTIONS, formatDays, formatTime } from '../../utils/schedule'
 
@@ -28,6 +29,7 @@ const UPFRONT_MILESTONE = {
 const EMPTY_FORM = {
   student: '', course: '', trainer: '', class_time: '', class_days: [],
   payment_type: '', discount_percent: '0', classes_total: '24',
+  trainer_rate_per_class: '', client_rate_per_class: '',
 }
 
 // Mirrors Trainer.has_rate_for() — an explicit per-course override, or the trainer's
@@ -38,6 +40,16 @@ function trainerHasRateForCourse(trainer, courseId) {
   const hasOverride = (trainer.course_rates || []).some((r) => String(r.course) === String(courseId))
   if (hasOverride) return true
   return trainer.default_rate_per_class != null
+}
+
+// Mirrors Trainer.rate_for() / Client.rate_for(): an explicit per-course override, else
+// the entity's own default/flat rate. Used only to pre-fill the enrollment form's rate
+// fields — the backend recomputes the same default if the field is left blank.
+function rateForCourse(entity, courseId) {
+  if (!entity || !courseId) return null
+  const override = (entity.course_rates || []).find((r) => String(r.course) === String(courseId))
+  if (override) return override.rate_per_class
+  return entity.default_rate_per_class ?? entity.rate_per_class ?? null
 }
 
 // Mirrors find_schedule_conflict() in enrollments/services.py: same trainer, same
@@ -69,9 +81,19 @@ function findScheduleConflict(trainerId, classTime, classDays, enrollments, subs
 
 export default function EnrollmentsPage() {
   const api = useApi()
-  const [students, setStudents] = useState([])
-  const [courses, setCourses] = useState([])
-  const [trainers, setTrainers] = useState([])
+  const pickerSearch = usePickerSearch()
+  // The "New enrollment" form's student/course/trainer pickers are async-search (see
+  // SearchableSelect's loadOptions mode) rather than backed by a preloaded list, so the
+  // full picked objects are captured here directly from each picker's onChange instead
+  // of being looked up from an array — see rateForCourse()/trainerHasRateForCourse()
+  // below, which only ever need the one currently-selected entity, not the whole list.
+  const [selectedStudent, setSelectedStudent] = useState(null)
+  const [selectedCourse, setSelectedCourse] = useState(null)
+  const [selectedTrainer, setSelectedTrainer] = useState(null)
+  // The B2B student's client — fetched by id (not searched) once a B2B student is
+  // picked, since the student picker's own result already carries the client's id/name
+  // but not its rate data.
+  const [selectedClient, setSelectedClient] = useState(null)
   const [substituteAssignments, setSubstituteAssignments] = useState([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -104,11 +126,8 @@ export default function EnrollmentsPage() {
   }, [loadEnrollments])
 
   useEffect(() => {
-    api('/api/students/').then((s) => setStudents(s.filter((x) => x.status === 'active'))).catch(() => {})
-    api('/api/courses/').then(setCourses).catch(() => {})
-    api('/api/trainers/').then((t) => setTrainers(t.filter((x) => x.status === 'active'))).catch(() => {})
     loadSubstituteAssignments().catch(() => {})
-  }, [api, loadSubstituteAssignments])
+  }, [loadSubstituteAssignments])
 
   function toggleDay(code) {
     setForm((f) => ({
@@ -117,8 +136,6 @@ export default function EnrollmentsPage() {
     }))
   }
 
-  const selectedStudent = students.find((s) => String(s.id) === form.student)
-  const selectedCourse = courses.find((c) => String(c.id) === form.course)
   const upfrontMilestone = UPFRONT_MILESTONE[form.payment_type]
 
   // Standard price = course rate x total classes. The admin only enters a discount
@@ -144,7 +161,6 @@ export default function EnrollmentsPage() {
       return
     }
 
-    const selectedTrainer = trainers.find((t) => String(t.id) === form.trainer)
     if (selectedTrainer && selectedCourse && !trainerHasRateForCourse(selectedTrainer, selectedCourse.id)) {
       setError(
         `${selectedTrainer.name} has no rate set for ${selectedCourse.name} — set a default rate or add a course override first.`
@@ -177,6 +193,10 @@ export default function EnrollmentsPage() {
           class_time: form.class_time,
           class_days: form.class_days.join(','),
           classes_total: Number(form.classes_total) || 24,
+          ...(form.trainer_rate_per_class !== '' ? { trainer_rate_per_class: form.trainer_rate_per_class } : {}),
+          ...(selectedStudent?.source_type === 'B2B' && form.client_rate_per_class !== '' ? {
+            client_rate_per_class: form.client_rate_per_class,
+          } : {}),
           ...(selectedStudent?.source_type === 'B2C' ? {
             payment_type: form.payment_type,
             discount_percent: form.discount_percent || '0',
@@ -184,6 +204,10 @@ export default function EnrollmentsPage() {
         },
       })
       setForm(EMPTY_FORM)
+      setSelectedStudent(null)
+      setSelectedCourse(null)
+      setSelectedTrainer(null)
+      setSelectedClient(null)
       setShowForm(false)
       await loadEnrollments()
     } catch (err) {
@@ -431,31 +455,70 @@ export default function EnrollmentsPage() {
               required
               placeholder="Search student…"
               value={form.student}
-              onChange={(v) => setForm({ ...form, student: v, payment_type: '', discount_percent: '0' })}
-              options={students.map((s) => ({ value: s.id, label: `${s.name} (${s.student_id})` }))}
+              selectedLabel={selectedStudent ? `${selectedStudent.name} (${selectedStudent.student_id})` : undefined}
+              onChange={(v, student) => {
+                setSelectedStudent(student)
+                setSelectedClient(null)
+                setForm((f) => ({
+                  ...f,
+                  student: v,
+                  payment_type: '',
+                  discount_percent: '0',
+                  client_rate_per_class: '',
+                }))
+                // The student picker's own result already has the client's id/name, but
+                // not its rate data — fetched by id (not searched) so rateForCourse()
+                // below has what it needs.
+                if (student?.source_type === 'B2B' && student.client) {
+                  api(`/api/clients/${student.client}/`)
+                    .then((client) => {
+                      setSelectedClient(client)
+                      setForm((f) => ({ ...f, client_rate_per_class: String(rateForCourse(client, f.course) ?? '') }))
+                    })
+                    .catch(() => {})
+                }
+              }}
+              loadOptions={pickerSearch.students}
             />
             <SearchableSelect
               required
               placeholder="Search course…"
               value={form.course}
-              onChange={(v) => {
+              selectedLabel={selectedCourse?.name}
+              onChange={(v, course) => {
                 // Default the batch count to this course's standard length — nothing
                 // tied these together before, so "Batch count" silently stayed at
                 // EMPTY_FORM's hardcoded 24 regardless of which course was picked,
                 // which also fed the B2C total-price preview below with the wrong
                 // class count for any course whose real length isn't 24. Still
-                // editable afterward for a genuinely partial/extended batch.
-                const course = courses.find((c) => String(c.id) === v)
-                setForm({ ...form, course: v, classes_total: course ? String(course.total_classes) : form.classes_total })
+                // editable afterward for a genuinely partial/extended batch. Trainer
+                // rate/class and (for B2B) client rate/class are re-suggested the same
+                // way — still editable afterward too.
+                setSelectedCourse(course)
+                setForm((f) => ({
+                  ...f,
+                  course: v,
+                  classes_total: course ? String(course.total_classes) : f.classes_total,
+                  trainer_rate_per_class: selectedTrainer ? String(rateForCourse(selectedTrainer, v) ?? '') : f.trainer_rate_per_class,
+                  client_rate_per_class: selectedClient ? String(rateForCourse(selectedClient, v) ?? '') : f.client_rate_per_class,
+                }))
               }}
-              options={courses.map((c) => ({ value: c.id, label: c.name }))}
+              loadOptions={pickerSearch.courses}
             />
             <SearchableSelect
               required
               placeholder="Search trainer…"
               value={form.trainer}
-              onChange={(v) => setForm({ ...form, trainer: v })}
-              options={trainers.map((t) => ({ value: t.id, label: t.name }))}
+              selectedLabel={selectedTrainer?.name}
+              onChange={(v, trainer) => {
+                setSelectedTrainer(trainer)
+                setForm((f) => ({
+                  ...f,
+                  trainer: v,
+                  trainer_rate_per_class: trainer ? String(rateForCourse(trainer, f.course) ?? '') : f.trainer_rate_per_class,
+                }))
+              }}
+              loadOptions={pickerSearch.trainers}
             />
             <input
               required
@@ -476,6 +539,18 @@ export default function EnrollmentsPage() {
                 className="input"
               />
             </div>
+            <div>
+              <label className="block text-xs text-text-secondary mb-1">Trainer rate/class (₹)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Trainer rate/class"
+                value={form.trainer_rate_per_class}
+                onChange={(e) => setForm({ ...form, trainer_rate_per_class: e.target.value })}
+                className="input"
+              />
+            </div>
             <div className="sm:col-span-2">
               <p className="text-sm text-text-secondary mb-1">Class days</p>
               <div className="flex flex-wrap gap-2">
@@ -492,6 +567,28 @@ export default function EnrollmentsPage() {
                 ))}
               </div>
             </div>
+            {selectedStudent?.source_type === 'B2B' && (
+              <>
+                <div className="input bg-surface-sunken text-text-secondary flex items-center justify-between">
+                  <span>Client</span>
+                  <span className="font-medium text-navy">
+                    {selectedStudent.client_name || '— no client set on this student'}
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">Client rate/class (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Client rate/class"
+                    value={form.client_rate_per_class}
+                    onChange={(e) => setForm({ ...form, client_rate_per_class: e.target.value })}
+                    className="input"
+                  />
+                </div>
+              </>
+            )}
             {selectedStudent?.source_type === 'B2C' && (
               <>
                 <p className="sm:col-span-2 text-xs text-text-tertiary -mb-1">Payment plan</p>
@@ -576,8 +673,9 @@ export default function EnrollmentsPage() {
               <SearchableSelect
                 placeholder="Search course…"
                 value={editCourse}
+                selectedLabel={editingEnrollment?.course_name}
                 onChange={setEditCourse}
-                options={courses.map((c) => ({ value: c.id, label: c.name }))}
+                loadOptions={pickerSearch.courses}
               />
             ) : (
               <p className="text-sm text-text-secondary">
@@ -641,7 +739,7 @@ export default function EnrollmentsPage() {
             placeholder="Search trainer…"
             value={transferTrainer}
             onChange={setTransferTrainer}
-            options={trainers.filter((t) => t.id !== transferEnrollment?.trainer).map((t) => ({ value: t.id, label: t.name }))}
+            loadOptions={(q) => pickerSearch.trainers(q).then((ts) => ts.filter((t) => t.id !== transferEnrollment?.trainer))}
           />
           {transferError && <p className="text-error text-xs">{transferError}</p>}
           <div className="flex justify-end gap-3">
@@ -664,7 +762,7 @@ export default function EnrollmentsPage() {
             placeholder="Search substitute trainer…"
             value={substituteTrainer}
             onChange={setSubstituteTrainer}
-            options={trainers.filter((t) => t.id !== substituteEnrollment?.trainer).map((t) => ({ value: t.id, label: t.name }))}
+            loadOptions={(q) => pickerSearch.trainers(q).then((ts) => ts.filter((t) => t.id !== substituteEnrollment?.trainer))}
           />
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -697,7 +795,7 @@ export default function EnrollmentsPage() {
           <p className="text-sm text-text-secondary">
             Withdraw <strong>{withdrawEnrollment?.student_name}</strong> from {withdrawEnrollment?.course_name}.
           </p>
-          {students.find((s) => s.id === withdrawEnrollment?.student)?.source_type === 'B2C' && (
+          {withdrawEnrollment?.student_source_type === 'B2C' && (
             <>
               <input
                 type="number"

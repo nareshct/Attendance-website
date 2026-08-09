@@ -93,6 +93,9 @@ class StudentViewSet(ModelViewSet):
         client_id = self.request.query_params.get('client')
         if client_id:
             qs = qs.filter(client_id=client_id)
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
         return qs
 
     def get_permissions(self):

@@ -7,6 +7,7 @@ import { Modal } from '../../components/Modal'
 import { SearchableSelect } from '../../components/SearchableSelect'
 import { useApi } from '../../hooks/useApi'
 import { usePaginatedList } from '../../hooks/usePaginatedList'
+import { usePickerSearch } from '../../hooks/usePickerSearch'
 
 const GRADES = Array.from({ length: 10 }, (_, i) => String(i + 3)) // std 3-12
 
@@ -17,9 +18,8 @@ const EMPTY_FORM = {
 
 export default function StudentsPage() {
   const api = useApi()
+  const pickerSearch = usePickerSearch()
   const [clients, setClients] = useState([])
-  const [trainers, setTrainers] = useState([])
-  const [courses, setCourses] = useState([])
   const [enrollments, setEnrollments] = useState([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -52,9 +52,10 @@ export default function StudentsPage() {
   }, [reload])
 
   useEffect(() => {
+    // Kept as a full unbounded fetch (unlike the filter pickers below) — this feeds the
+    // "Add student" form's native <select> of active clients, which isn't a
+    // SearchableSelect and so isn't converted to search-as-you-type here.
     api('/api/clients/').then(setClients).catch(() => {})
-    api('/api/trainers/').then(setTrainers).catch(() => {})
-    api('/api/courses/').then(setCourses).catch(() => {})
     api('/api/enrollments/').then(setEnrollments).catch(() => {})
   }, [api])
 
@@ -217,7 +218,9 @@ export default function StudentsPage() {
             placeholder="All clients"
             value={clientFilter}
             onChange={setClientFilter}
-            options={[{ value: '', label: 'All clients' }, ...clients.map((c) => ({ value: c.id, label: c.company_name }))]}
+            loadOptions={(q) =>
+              pickerSearch.clients(q, { status: '' }).then((cs) => (q ? cs : [{ value: '', label: 'All clients' }, ...cs]))
+            }
           />
         )}
         <select value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} className="input">
@@ -228,13 +231,15 @@ export default function StudentsPage() {
           placeholder="All trainers"
           value={trainerFilter}
           onChange={setTrainerFilter}
-          options={[{ value: '', label: 'All trainers' }, ...trainers.map((t) => ({ value: t.id, label: t.name }))]}
+          loadOptions={(q) =>
+            pickerSearch.trainers(q, { status: '' }).then((ts) => (q ? ts : [{ value: '', label: 'All trainers' }, ...ts]))
+          }
         />
         <SearchableSelect
           placeholder="All classes"
           value={courseFilter}
           onChange={setCourseFilter}
-          options={[{ value: '', label: 'All classes' }, ...courses.map((c) => ({ value: c.id, label: c.name }))]}
+          loadOptions={(q) => pickerSearch.courses(q).then((cs) => (q ? cs : [{ value: '', label: 'All classes' }, ...cs]))}
         />
       </div>
 

@@ -41,7 +41,8 @@ def client_totals(client, start=None, end=None, as_of=None):
     # Grouped by date too (not just trainer+course) when as_of isn't fixing the whole
     # query to one date — classes on different dates can fall either side of a rate
     # change, so each date's group needs its own rate lookup.
-    group_fields = ['marked_by', 'enrollment__course'] if as_of is not None else ['marked_by', 'enrollment__course', 'date']
+    group_fields = ['marked_by', 'enrollment__course', 'enrollment__trainer_rate_per_class', 'enrollment__client_rate_per_class']
+    group_fields += [] if as_of is not None else ['date']
     rows = qs.values(*group_fields).annotate(count=Count('id'))
 
     trainer_ids = {row['marked_by'] for row in rows}
@@ -66,12 +67,21 @@ def client_totals(client, start=None, end=None, as_of=None):
         trainer = trainers[trainer_id]
         price_date = as_of if as_of is not None else row['date']
 
-        trainer_rate = historical_rate(trainer, course_id, price_date)
+        # An enrollment-specific rate (set on the enrollment form) always wins over the
+        # trainer's/client's own course rate — see Enrollment.trainer_rate_per_class /
+        # client_rate_per_class. The trainer side applies to whoever actually taught the
+        # class (the enrollment's own trainer or a substitute), since it prices the
+        # batch, not the trainer.
+        trainer_rate = row['enrollment__trainer_rate_per_class']
         if trainer_rate is None:
-            trainer_rate = trainer_overrides.get((trainer_id, course_id), trainer.default_rate_per_class or Decimal('0.00'))
-        client_rate = historical_rate(client, course_id, price_date)
+            trainer_rate = historical_rate(trainer, course_id, price_date)
+            if trainer_rate is None:
+                trainer_rate = trainer_overrides.get((trainer_id, course_id), trainer.default_rate_per_class or Decimal('0.00'))
+        client_rate = row['enrollment__client_rate_per_class']
         if client_rate is None:
-            client_rate = client_overrides.get(course_id, client_default_rate)
+            client_rate = historical_rate(client, course_id, price_date)
+            if client_rate is None:
+                client_rate = client_overrides.get(course_id, client_default_rate)
 
         total_classes += count
         trainer_cost += trainer_rate * count
@@ -153,7 +163,7 @@ def client_course_breakdown(client, start, end):
             status='present', enrollment__student__client=client, invoice_adjustment__isnull=True,
             date__gte=start, date__lte=end,
         )
-        .values('enrollment__course', 'enrollment__course__name')
+        .values('enrollment__course', 'enrollment__course__name', 'enrollment__client_rate_per_class')
         .annotate(count=Count('id'))
         .order_by('enrollment__course__name')
     )
@@ -163,7 +173,10 @@ def client_course_breakdown(client, start, end):
 
     breakdown = []
     for row in rows:
-        rate = client_overrides.get(row['enrollment__course'], client_default_rate)
+        # See client_totals() — an enrollment-specific rate always wins.
+        rate = row['enrollment__client_rate_per_class']
+        if rate is None:
+            rate = client_overrides.get(row['enrollment__course'], client_default_rate)
         count = row['count']
         breakdown.append({
             'course_name': row['enrollment__course__name'],

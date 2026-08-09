@@ -49,10 +49,14 @@ class TrainerViewSet(ModelViewSet):
             Payout.objects.filter(trainer=OuterRef('pk'), paid_status='pending')
             .order_by().values('trainer').annotate(total=Sum('total_amount')).values('total')
         )
-        return Trainer.objects.all().order_by('name').prefetch_related('course_rates').annotate(
+        qs = Trainer.objects.all().order_by('name').prefetch_related('course_rates').annotate(
             active_student_count=Count('enrollments', filter=Q(enrollments__status='ongoing')),
             pending_payout_amount=Coalesce(Subquery(pending_payouts), Decimal('0.00')),
         )
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
 
     @action(detail=True, methods=['get'], url_path='archive-blockers')
     def archive_blockers(self, request, pk=None):

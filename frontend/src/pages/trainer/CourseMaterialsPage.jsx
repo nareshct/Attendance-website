@@ -4,20 +4,21 @@ import { Card } from '../../components/Card'
 import { SearchableSelect } from '../../components/SearchableSelect'
 import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
+import { usePickerSearch } from '../../hooks/usePickerSearch'
 import { formatDate } from '../../utils/date'
+
+function loadCourseFilterOptions(pickerSearch, query) {
+  return pickerSearch.courses(query).then((cs) => (query ? cs : [{ value: '', label: 'All courses' }, ...cs]))
+}
 
 export default function CourseMaterialsPage() {
   const api = useApi()
+  const pickerSearch = usePickerSearch()
   const { auth } = useAuth()
-  const [courses, setCourses] = useState([])
   const [materials, setMaterials] = useState([])
   const [courseFilter, setCourseFilter] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
-
-  useEffect(() => {
-    api('/api/courses/').then(setCourses).catch(() => {})
-  }, [api])
 
   useEffect(() => {
     const params = courseFilter ? `?course=${courseFilter}` : ''
@@ -49,7 +50,7 @@ export default function CourseMaterialsPage() {
           placeholder="All courses"
           value={courseFilter}
           onChange={setCourseFilter}
-          options={[{ value: '', label: 'All courses' }, ...courses.map((c) => ({ value: c.id, label: c.name }))]}
+          loadOptions={(q) => loadCourseFilterOptions(pickerSearch, q)}
         />
       </div>
 

@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
-from rest_framework import status
+from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
@@ -22,6 +22,11 @@ from .services import client_totals, get_archive_blockers
 class ClientViewSet(ModelViewSet):
     serializer_class = ClientSerializer
     permission_classes = [IsAdmin]
+    # ?search= matches company name OR contact phone (case-insensitive substring) — same
+    # server-side search pattern as TrainerViewSet/StudentViewSet, used by both the
+    # Clients list page and any async-search client picker (see SearchableSelect).
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['company_name', 'contact_phone']
     # No DELETE — clients are only ever archived (see archive/unarchive below), never
     # hard-deleted, so their students'/invoices' history can never be lost.
     http_method_names = ['get', 'post', 'put', 'patch', 'head', 'options']
@@ -42,7 +47,7 @@ class ClientViewSet(ModelViewSet):
             ClientInvoice.objects.filter(client=OuterRef('pk'), status='pending', cycle__cycle_end__lt=cutoff)
             .order_by().values('client').annotate(c=Count('id')).values('c')
         )
-        return Client.objects.annotate(
+        qs = Client.objects.annotate(
             pending_amount=Coalesce(
                 Sum('invoices__total_amount', filter=Q(invoices__status='pending', invoices__cycle__status='closed')),
                 Decimal('0.00'),
@@ -50,6 +55,10 @@ class ClientViewSet(ModelViewSet):
             active_student_count=Coalesce(Subquery(active_students), 0),
             overdue_invoice_count=Coalesce(Subquery(overdue_invoices), 0),
         ).order_by('company_name')
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs
 
     @action(detail=False, methods=['get'])
     def summary(self, request):
