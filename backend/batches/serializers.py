@@ -26,30 +26,25 @@ class BatchPayoutSerializer(serializers.ModelSerializer):
 
 
 class BatchEnrollmentSerializer(serializers.ModelSerializer):
-    # Resolves to the registered student's name, or the guest's typed name if this
-    # enrollment isn't linked to a Student record at all — see BatchEnrollment.display_name.
+    # Every enrollment is linked to a registered Student — see BatchEnrollment.display_name
+    # and batches.services.find_or_create_student, which resolves one at creation time.
     student_name = serializers.CharField(source='display_name', read_only=True)
-    student_id_code = serializers.CharField(source='student.student_id', read_only=True, default=None)
-    is_guest = serializers.SerializerMethodField()
+    student_id_code = serializers.CharField(source='student.student_id', read_only=True)
     installments = BatchInstallmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = BatchEnrollment
         fields = [
-            'id', 'batch', 'student', 'student_name', 'student_id_code', 'is_guest',
-            'guest_name', 'guest_phone_number', 'guest_email', 'guest_occupation', 'guest_source',
+            'id', 'batch', 'student', 'student_name', 'student_id_code',
+            'contact_email', 'occupation', 'lead_source',
             'joined_date', 'status', 'refunded_amount', 'refund_note', 'installments',
         ]
         read_only_fields = ['joined_date', 'status', 'refunded_amount', 'refund_note']
 
-    def get_is_guest(self, obj):
-        return obj.student_id is None
-
     def validate(self, data):
         # batch/student stay writable (required at creation) but can't be reassigned via
         # a later PATCH — moving someone to a different batch or swapping the linked
-        # student isn't a supported edit; convert_to_student is the one sanctioned way
-        # to attach a student to an existing (guest) row, and it bypasses this serializer.
+        # student isn't a supported edit.
         if self.instance:
             if 'batch' in data and data['batch'] != self.instance.batch:
                 raise serializers.ValidationError({'batch': "Can't move this enrollment to a different batch."})

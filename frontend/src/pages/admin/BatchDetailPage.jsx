@@ -46,11 +46,21 @@ export default function BatchDetailPage() {
   const [savingBatch, setSavingBatch] = useState(false)
   const [trainerNameInput, setTrainerNameInput] = useState('')
 
-  const EMPTY_GUEST_FORM = { guest_name: '', guest_phone_number: '', guest_email: '', guest_occupation: '', guest_source: '' }
+  // name/phone here are never stored on the enrollment — they're just input for the
+  // backend to match-or-create the real Student (find_or_create_student). Grade/
+  // parent_name/place are the same: only used if a new student ends up getting created,
+  // never applied to an existing match.
+  const EMPTY_NEW_STUDENT_FORM = {
+    name: '', phone_number: '', grade: '', parent_name: '', place: '',
+    contact_email: '', occupation: '', lead_source: '',
+  }
+  // Occupation/email/source are the only lead-info fields actually stored on (and
+  // editable on) an existing enrollment — name/phone live on the linked Student instead.
+  const EMPTY_LEAD_INFO_FORM = { contact_email: '', occupation: '', lead_source: '' }
   const [showAddStudent, setShowAddStudent] = useState(false)
   const [addMode, setAddMode] = useState('existing')
   const [addStudentId, setAddStudentId] = useState('')
-  const [guestForm, setGuestForm] = useState(EMPTY_GUEST_FORM)
+  const [newStudentForm, setNewStudentForm] = useState(EMPTY_NEW_STUDENT_FORM)
   const [addStudentError, setAddStudentError] = useState('')
   const [addingStudent, setAddingStudent] = useState(false)
 
@@ -240,7 +250,6 @@ export default function BatchDetailPage() {
 
   const [studentStatusFilter, setStudentStatusFilter] = useState('all')
   const [studentPaymentFilter, setStudentPaymentFilter] = useState('all')
-  const [studentRegFilter, setStudentRegFilter] = useState('all')
 
   function enrollmentPaymentState(e) {
     const relevant = e.installments.filter((inst) => inst.paid_status !== 'cancelled')
@@ -249,12 +258,10 @@ export default function BatchDetailPage() {
   }
 
   // Search (studentSearch above) is already applied server-side via enrollmentsPath —
-  // this only layers the status/payment/registration dropdowns on top of what's loaded,
-  // same trade-off documented in usePaginatedList.
+  // this only layers the status/payment dropdowns on top of what's loaded, same
+  // trade-off documented in usePaginatedList.
   const filteredEnrollments = enrollments.filter((e) => {
     if (studentStatusFilter !== 'all' && e.status !== studentStatusFilter) return false
-    if (studentRegFilter === 'registered' && e.is_guest) return false
-    if (studentRegFilter === 'guest' && !e.is_guest) return false
     if (studentPaymentFilter !== 'all' && enrollmentPaymentState(e) !== studentPaymentFilter) return false
     return true
   })
@@ -263,7 +270,7 @@ export default function BatchDetailPage() {
     setShowAddStudent(false)
     setAddMode('existing')
     setAddStudentId('')
-    setGuestForm(EMPTY_GUEST_FORM)
+    setNewStudentForm(EMPTY_NEW_STUDENT_FORM)
     setAddStudentError('')
   }
 
@@ -274,7 +281,7 @@ export default function BatchDetailPage() {
     try {
       const body = addMode === 'existing'
         ? { batch: Number(id), student: Number(addStudentId) }
-        : { batch: Number(id), ...guestForm }
+        : { batch: Number(id), ...newStudentForm }
       await api('/api/batch-enrollments/', { method: 'POST', body })
       closeAddStudent()
       await refreshAfterMoneyChange()
@@ -338,51 +345,33 @@ export default function BatchDetailPage() {
     }
   }
 
-  const [convertTarget, setConvertTarget] = useState(null)
+  const [leadInfoTarget, setLeadInfoTarget] = useState(null)
+  const [leadInfoForm, setLeadInfoForm] = useState(EMPTY_LEAD_INFO_FORM)
+  const [leadInfoError, setLeadInfoError] = useState('')
+  const [savingLeadInfo, setSavingLeadInfo] = useState(false)
 
-  async function handleConvertToStudent() {
-    setBusy(true)
-    setError('')
-    try {
-      await api(`/api/batch-enrollments/${convertTarget.id}/convert_to_student/`, { method: 'POST' })
-      setConvertTarget(null)
-      await refreshAfterMoneyChange()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const [editGuestTarget, setEditGuestTarget] = useState(null)
-  const [editGuestForm, setEditGuestForm] = useState(EMPTY_GUEST_FORM)
-  const [editGuestError, setEditGuestError] = useState('')
-  const [savingGuestEdit, setSavingGuestEdit] = useState(false)
-
-  function openEditGuest(enrollment) {
-    setEditGuestTarget(enrollment)
-    setEditGuestForm({
-      guest_name: enrollment.guest_name || '',
-      guest_phone_number: enrollment.guest_phone_number || '',
-      guest_email: enrollment.guest_email || '',
-      guest_occupation: enrollment.guest_occupation || '',
-      guest_source: enrollment.guest_source || '',
+  function openEditLeadInfo(enrollment) {
+    setLeadInfoTarget(enrollment)
+    setLeadInfoForm({
+      contact_email: enrollment.contact_email || '',
+      occupation: enrollment.occupation || '',
+      lead_source: enrollment.lead_source || '',
     })
-    setEditGuestError('')
+    setLeadInfoError('')
   }
 
-  async function handleSaveGuestEdit(e) {
+  async function handleSaveLeadInfo(e) {
     e.preventDefault()
-    setSavingGuestEdit(true)
-    setEditGuestError('')
+    setSavingLeadInfo(true)
+    setLeadInfoError('')
     try {
-      await api(`/api/batch-enrollments/${editGuestTarget.id}/`, { method: 'PATCH', body: editGuestForm })
-      setEditGuestTarget(null)
+      await api(`/api/batch-enrollments/${leadInfoTarget.id}/`, { method: 'PATCH', body: leadInfoForm })
+      setLeadInfoTarget(null)
       await reloadEnrollments()
     } catch (err) {
-      setEditGuestError(err.message)
+      setLeadInfoError(err.message)
     } finally {
-      setSavingGuestEdit(false)
+      setSavingLeadInfo(false)
     }
   }
 
@@ -969,12 +958,12 @@ export default function BatchDetailPage() {
           </button>
           <ul className="text-xs text-text-tertiary list-disc pl-4">
             <li><span className="font-medium text-text-secondary">Name</span> — required</li>
-            <li><span className="font-medium text-text-secondary">Phone Number</span>, <span className="font-medium text-text-secondary">Occupation</span>, <span className="font-medium text-text-secondary">Email</span>, <span className="font-medium text-text-secondary">How did you know about us?</span> — optional</li>
+            <li><span className="font-medium text-text-secondary">Phone Number</span>, <span className="font-medium text-text-secondary">Grade</span>, <span className="font-medium text-text-secondary">Occupation</span>, <span className="font-medium text-text-secondary">Email</span>, <span className="font-medium text-text-secondary">Parent Name</span>, <span className="font-medium text-text-secondary">Place</span>, <span className="font-medium text-text-secondary">How did you know about us?</span> — optional, fill in what you have</li>
             <li><span className="font-medium text-text-secondary">Payment Status</span> — "Paid" marks the upfront installment paid; leave blank otherwise</li>
           </ul>
           <p className="text-xs text-text-tertiary">
-            Every row is added as someone not yet registered in the system — same as adding a guest by hand. This
-            never creates or links a registered Student record.
+            Every row registers a real student record — matched to an existing student by name + phone if one
+            exists, otherwise a new one is created.
           </p>
           <form onSubmit={handleImport} className="space-y-3 pt-2 border-t border-gray-100">
             <input
@@ -1018,8 +1007,8 @@ export default function BatchDetailPage() {
           <Button type="button" size="sm" variant={addMode === 'existing' ? 'primary' : 'secondary'} onClick={() => setAddMode('existing')}>
             Registered student
           </Button>
-          <Button type="button" size="sm" variant={addMode === 'guest' ? 'primary' : 'secondary'} onClick={() => setAddMode('guest')}>
-            Not registered yet
+          <Button type="button" size="sm" variant={addMode === 'new' ? 'primary' : 'secondary'} onClick={() => setAddMode('new')}>
+            New student
           </Button>
         </div>
         <form onSubmit={handleAddStudent} className="space-y-3">
@@ -1035,36 +1024,57 @@ export default function BatchDetailPage() {
               <input
                 required
                 placeholder="Name"
-                value={guestForm.guest_name}
-                onChange={(e) => setGuestForm({ ...guestForm, guest_name: e.target.value })}
+                value={newStudentForm.name}
+                onChange={(e) => setNewStudentForm({ ...newStudentForm, name: e.target.value })}
                 className="input"
               />
               <input
-                placeholder="Phone number (optional)"
-                value={guestForm.guest_phone_number}
-                onChange={(e) => setGuestForm({ ...guestForm, guest_phone_number: e.target.value })}
+                placeholder="Phone number (optional, but matches an existing student if one exists)"
+                value={newStudentForm.phone_number}
+                onChange={(e) => setNewStudentForm({ ...newStudentForm, phone_number: e.target.value })}
+                className="input"
+              />
+              <input
+                placeholder="Grade (optional)"
+                value={newStudentForm.grade}
+                onChange={(e) => setNewStudentForm({ ...newStudentForm, grade: e.target.value })}
+                className="input"
+              />
+              <input
+                placeholder="Parent name (optional)"
+                value={newStudentForm.parent_name}
+                onChange={(e) => setNewStudentForm({ ...newStudentForm, parent_name: e.target.value })}
+                className="input"
+              />
+              <input
+                placeholder="Place (optional)"
+                value={newStudentForm.place}
+                onChange={(e) => setNewStudentForm({ ...newStudentForm, place: e.target.value })}
                 className="input"
               />
               <input
                 placeholder="Occupation (optional)"
-                value={guestForm.guest_occupation}
-                onChange={(e) => setGuestForm({ ...guestForm, guest_occupation: e.target.value })}
+                value={newStudentForm.occupation}
+                onChange={(e) => setNewStudentForm({ ...newStudentForm, occupation: e.target.value })}
                 className="input"
               />
               <input
                 type="email"
                 placeholder="Email (optional)"
-                value={guestForm.guest_email}
-                onChange={(e) => setGuestForm({ ...guestForm, guest_email: e.target.value })}
+                value={newStudentForm.contact_email}
+                onChange={(e) => setNewStudentForm({ ...newStudentForm, contact_email: e.target.value })}
                 className="input"
               />
               <input
                 placeholder="How did they hear about us? (optional)"
-                value={guestForm.guest_source}
-                onChange={(e) => setGuestForm({ ...guestForm, guest_source: e.target.value })}
+                value={newStudentForm.lead_source}
+                onChange={(e) => setNewStudentForm({ ...newStudentForm, lead_source: e.target.value })}
                 className="input"
               />
-              <p className="text-xs text-text-tertiary">Not registered as a student — this just records their details for this batch.</p>
+              <p className="text-xs text-text-tertiary">
+                Registers a new student record (or links an existing one, if the name + phone match) — fill in what
+                you know, leave the rest blank.
+              </p>
             </>
           )}
           <p className="text-xs text-text-tertiary">
@@ -1076,7 +1086,7 @@ export default function BatchDetailPage() {
               Cancel
             </Button>
             <Button
-              disabled={(addMode === 'existing' ? !addStudentId : !guestForm.guest_name.trim()) || addingStudent}
+              disabled={(addMode === 'existing' ? !addStudentId : !newStudentForm.name.trim()) || addingStudent}
               type="submit"
               variant="success"
             >
@@ -1104,11 +1114,6 @@ export default function BatchDetailPage() {
             <option value="paid">Fully paid</option>
             <option value="pending">Payment pending</option>
           </select>
-          <select value={studentRegFilter} onChange={(e) => setStudentRegFilter(e.target.value)} className="input w-auto">
-            <option value="all">Registered + not registered</option>
-            <option value="registered">Registered only</option>
-            <option value="guest">Not registered only</option>
-          </select>
           <span className="text-xs text-text-tertiary">
             {filteredEnrollments.length} shown · {enrollments.length} of {enrollmentCount} loaded
           </span>
@@ -1120,20 +1125,12 @@ export default function BatchDetailPage() {
           <Card key={e.id}>
             <div className="flex items-center justify-between mb-2">
               <div>
-                {e.is_guest ? (
-                  <span className="font-medium">{e.student_name}</span>
-                ) : (
-                  <Link to={`/admin/students/${e.student}`} className="text-primary hover:underline font-medium focus-ring">{e.student_name}</Link>
-                )}
-                {e.is_guest ? (
-                  <span className="text-xs text-warning bg-warning-tint rounded px-1.5 py-0.5 ml-2">Not registered</span>
-                ) : (
-                  <span className="text-xs text-text-tertiary ml-2">{e.student_id_code}</span>
-                )}
+                <Link to={`/admin/students/${e.student}`} className="text-primary hover:underline font-medium focus-ring">{e.student_name}</Link>
+                <span className="text-xs text-text-tertiary ml-2">{e.student_id_code}</span>
                 <span className="text-xs text-text-tertiary ml-2">joined {formatDate(e.joined_date)}</span>
-                {e.is_guest && (e.guest_phone_number || e.guest_email || e.guest_occupation || e.guest_source) && (
+                {(e.contact_email || e.occupation || e.lead_source) && (
                   <div className="text-xs text-text-tertiary mt-0.5">
-                    {[e.guest_phone_number, e.guest_email, e.guest_occupation, e.guest_source].filter(Boolean).join(' · ')}
+                    {[e.contact_email, e.occupation, e.lead_source].filter(Boolean).join(' · ')}
                   </div>
                 )}
                 {e.status === 'withdrawn' && Number(e.refunded_amount) > 0 && (
@@ -1144,16 +1141,9 @@ export default function BatchDetailPage() {
               </div>
               <div className="flex items-center gap-3">
                 <Badge status={e.status} />
-                {e.is_guest && (
-                  <button disabled={busy} onClick={() => openEditGuest(e)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
-                    Edit
-                  </button>
-                )}
-                {e.is_guest && (
-                  <button disabled={busy} onClick={() => setConvertTarget(e)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
-                    Register
-                  </button>
-                )}
+                <button disabled={busy} onClick={() => openEditLeadInfo(e)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
+                  Edit
+                </button>
                 {e.status === 'active' && (
                   <button disabled={busy} onClick={() => openWithdraw(e)} className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring">
                     Withdraw
@@ -1300,48 +1290,38 @@ export default function BatchDetailPage() {
         )}
       </Modal>
 
-      <Modal open={Boolean(editGuestTarget)} onClose={() => setEditGuestTarget(null)} title="Edit details">
-        {editGuestTarget && (
-          <form onSubmit={handleSaveGuestEdit} className="space-y-3">
-            <input
-              required
-              placeholder="Name"
-              value={editGuestForm.guest_name}
-              onChange={(e) => setEditGuestForm({ ...editGuestForm, guest_name: e.target.value })}
-              className="input"
-            />
-            <input
-              placeholder="Phone number (optional)"
-              value={editGuestForm.guest_phone_number}
-              onChange={(e) => setEditGuestForm({ ...editGuestForm, guest_phone_number: e.target.value })}
-              className="input"
-            />
+      <Modal open={Boolean(leadInfoTarget)} onClose={() => setLeadInfoTarget(null)} title="Edit lead info">
+        {leadInfoTarget && (
+          <form onSubmit={handleSaveLeadInfo} className="space-y-3">
+            <p className="text-xs text-text-tertiary">
+              To fix {leadInfoTarget.student_name}'s name or phone number, edit their student profile instead.
+            </p>
             <input
               placeholder="Occupation (optional)"
-              value={editGuestForm.guest_occupation}
-              onChange={(e) => setEditGuestForm({ ...editGuestForm, guest_occupation: e.target.value })}
+              value={leadInfoForm.occupation}
+              onChange={(e) => setLeadInfoForm({ ...leadInfoForm, occupation: e.target.value })}
               className="input"
             />
             <input
               type="email"
               placeholder="Email (optional)"
-              value={editGuestForm.guest_email}
-              onChange={(e) => setEditGuestForm({ ...editGuestForm, guest_email: e.target.value })}
+              value={leadInfoForm.contact_email}
+              onChange={(e) => setLeadInfoForm({ ...leadInfoForm, contact_email: e.target.value })}
               className="input"
             />
             <input
               placeholder="How did they hear about us? (optional)"
-              value={editGuestForm.guest_source}
-              onChange={(e) => setEditGuestForm({ ...editGuestForm, guest_source: e.target.value })}
+              value={leadInfoForm.lead_source}
+              onChange={(e) => setLeadInfoForm({ ...leadInfoForm, lead_source: e.target.value })}
               className="input"
             />
-            {editGuestError && <p className="text-error text-xs">{editGuestError}</p>}
+            {leadInfoError && <p className="text-error text-xs">{leadInfoError}</p>}
             <div className="flex justify-end gap-3">
-              <Button type="button" variant="ghost" onClick={() => setEditGuestTarget(null)}>
+              <Button type="button" variant="ghost" onClick={() => setLeadInfoTarget(null)}>
                 Cancel
               </Button>
-              <Button disabled={savingGuestEdit} type="submit" variant="success">
-                {savingGuestEdit ? 'Saving…' : 'Save'}
+              <Button disabled={savingLeadInfo} type="submit" variant="success">
+                {savingLeadInfo ? 'Saving…' : 'Save'}
               </Button>
             </div>
           </form>
@@ -1384,16 +1364,6 @@ export default function BatchDetailPage() {
         busy={busy}
       />
 
-      <ConfirmDialog
-        open={Boolean(convertTarget)}
-        onClose={() => setConvertTarget(null)}
-        onConfirm={handleConvertToStudent}
-        title="Register as student"
-        message={`Register ${convertTarget?.student_name} as a student using the details captured here?`}
-        confirmLabel="Register"
-        busyLabel="Registering…"
-        busy={busy}
-      />
     </div>
   )
 }

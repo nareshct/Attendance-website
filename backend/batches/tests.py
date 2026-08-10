@@ -211,48 +211,76 @@ class BatchApiTests(APITestCase):
         response5 = BatchViewSet.as_view({'get': 'revenue'})(request5, pk=batch_id)
         self.assertEqual(response5.data['collected'], Decimal('2000.00'))
 
-    def test_enroll_guest_without_registration(self):
-        # A batch can include someone who was never registered as a Student —
-        # only their name is required, everything else is optional lead capture.
+    def test_add_unregistered_name_creates_and_links_a_new_student(self):
+        # A batch enrollment can be added by just a name — only the name is required,
+        # everything else is optional lead capture — but it always resolves to a real,
+        # registered Student now (see find_or_create_student), never a name-only row.
         batch = _make_batch(payment_type='one_time')
         request = self._req('post', '/api/batch-enrollments/', {
-            'batch': batch.id, 'guest_name': 'Walk-in Kid', 'guest_phone_number': '9876543210',
-            'guest_source': 'Instagram ad',
+            'batch': batch.id, 'name': 'Walk-in Kid', 'phone_number': '9876543210',
+            'lead_source': 'Instagram ad',
         })
         response = BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertIsNone(response.data['student'])
+        self.assertIsNotNone(response.data['student'])
         self.assertEqual(response.data['student_name'], 'Walk-in Kid')
-        self.assertIsNone(response.data['student_id_code'])
-        self.assertTrue(response.data['is_guest'])
-        self.assertEqual(response.data['guest_phone_number'], '9876543210')
-        self.assertEqual(response.data['guest_source'], 'Instagram ad')
+        self.assertIsNotNone(response.data['student_id_code'])
+        self.assertEqual(response.data['lead_source'], 'Instagram ad')
         self.assertEqual(len(response.data['installments']), 1)
 
         enrollment = BatchEnrollment.objects.get(id=response.data['id'])
         self.assertEqual(enrollment.display_name, 'Walk-in Kid')
+        self.assertEqual(enrollment.student.source_type, 'B2C')
+        self.assertEqual(enrollment.student.parent_phone_number, '9876543210')
+        self.assertEqual(Student.objects.count(), 1)
 
-    def test_enrollment_requires_either_student_or_guest_name(self):
+    def test_add_unregistered_name_passes_through_parent_name_and_place(self):
+        batch = _make_batch(payment_type='one_time')
+        request = self._req('post', '/api/batch-enrollments/', {
+            'batch': batch.id, 'name': 'Walk-in Kid', 'phone_number': '9876543210',
+            'parent_name': 'Meera Rao', 'place': 'Chennai',
+        })
+        response = BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 201, response.data)
+        student = Student.objects.get(name='Walk-in Kid')
+        self.assertEqual(student.parent_name, 'Meera Rao')
+        self.assertEqual(student.place, 'Chennai')
+
+    def test_add_unregistered_name_matches_existing_student_by_name_and_phone(self):
+        # Someone with this exact name + phone is already registered — must link them,
+        # not create a duplicate Student record.
+        existing = Student.objects.create(name='Walk-in Kid', grade='6', parent_phone_number='98765 43210', source_type='B2C')
+        batch = _make_batch(payment_type='one_time')
+        request = self._req('post', '/api/batch-enrollments/', {
+            'batch': batch.id, 'name': 'Walk-in Kid', 'phone_number': '9876543210',
+        })
+        response = BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['student'], existing.id)
+        self.assertEqual(Student.objects.count(), 1)
+
+    def test_enrollment_requires_either_student_or_a_name(self):
         batch = _make_batch(payment_type='one_time')
         request = self._req('post', '/api/batch-enrollments/', {'batch': batch.id})
         response = BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
         self.assertEqual(response.status_code, 400)
 
-    def test_cannot_provide_both_student_and_guest_name(self):
+    def test_cannot_provide_both_student_and_a_name(self):
         batch = _make_batch(payment_type='one_time')
         student = _make_student()
         request = self._req('post', '/api/batch-enrollments/', {
-            'batch': batch.id, 'student': student.id, 'guest_name': 'Someone Else',
+            'batch': batch.id, 'student': student.id, 'name': 'Someone Else',
         })
         response = BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
         self.assertEqual(response.status_code, 400)
 
-    def test_cannot_double_enroll_same_guest_via_manual_add(self):
-        # Manually re-submitting "Add student" for the same guest (e.g. a double-click,
-        # or re-adding someone already added) must be rejected the same way the Excel
-        # import rejects a repeated row — no unique_together to lean on since student=None.
+    def test_cannot_double_enroll_same_name_via_manual_add(self):
+        # Manually re-submitting "Add student" for the same name+phone (e.g. a
+        # double-click, or re-adding someone already added) resolves to the same
+        # already-created Student both times (see find_or_create_student), so the
+        # second submission is rejected as an existing-student duplicate.
         batch = _make_batch(payment_type='one_time')
-        body = {'batch': batch.id, 'guest_name': 'Dup Kid', 'guest_phone_number': '90000 11111'}
+        body = {'batch': batch.id, 'name': 'Dup Kid', 'phone_number': '90000 11111'}
 
         request1 = self._req('post', '/api/batch-enrollments/', body)
         response1 = BatchEnrollmentViewSet.as_view({'post': 'create'})(request1)
@@ -261,12 +289,12 @@ class BatchApiTests(APITestCase):
         request2 = self._req('post', '/api/batch-enrollments/', body)
         response2 = BatchEnrollmentViewSet.as_view({'post': 'create'})(request2)
         self.assertEqual(response2.status_code, 400)
-        self.assertEqual(BatchEnrollment.objects.filter(batch=batch, guest_name='Dup Kid').count(), 1)
+        self.assertEqual(BatchEnrollment.objects.filter(batch=batch, student__name='Dup Kid').count(), 1)
 
-    def test_guest_without_phone_can_be_added_more_than_once(self):
+    def test_name_without_phone_can_be_added_more_than_once(self):
         # No phone means there's nothing reliable to dedup on — same policy as the import.
         batch = _make_batch(payment_type='one_time')
-        body = {'batch': batch.id, 'guest_name': 'No Phone Kid'}
+        body = {'batch': batch.id, 'name': 'No Phone Kid'}
 
         request1 = self._req('post', '/api/batch-enrollments/', body)
         response1 = BatchEnrollmentViewSet.as_view({'post': 'create'})(request1)
@@ -275,7 +303,7 @@ class BatchApiTests(APITestCase):
         request2 = self._req('post', '/api/batch-enrollments/', body)
         response2 = BatchEnrollmentViewSet.as_view({'post': 'create'})(request2)
         self.assertEqual(response2.status_code, 201, response2.data)
-        self.assertEqual(BatchEnrollment.objects.filter(batch=batch, guest_name='No Phone Kid').count(), 2)
+        self.assertEqual(BatchEnrollment.objects.filter(batch=batch, student__name='No Phone Kid').count(), 2)
 
     def test_withdraw_cancels_pending_installments(self):
         batch = _make_batch(payment_type='two_installments')
@@ -393,7 +421,7 @@ class BatchImportTests(APITestCase):
         force_authenticate(request, user=self.admin)
         return BatchViewSet.as_view({'post': 'import_students'})(request, pk=batch_id)
 
-    def test_import_creates_guest_enrollments_never_a_student_record(self):
+    def test_import_creates_and_links_registered_students(self):
         file_obj = self._make_excel([
             ['Asha Kumar', '9876543210', 'Engineer', 'asha@example.com', 'Instagram ad', 'Paid'],
             ['Vikram Rao', '9123456789', '', '', 'Referral', ''],
@@ -404,36 +432,76 @@ class BatchImportTests(APITestCase):
         self.assertEqual(response.data['marked_paid'], 1)
         self.assertEqual(response.data['skipped'], [])
 
-        self.assertEqual(Student.objects.count(), 0)
+        self.assertEqual(Student.objects.count(), 2)
 
-        enrollment = BatchEnrollment.objects.get(batch=self.batch, guest_name='Asha Kumar')
-        self.assertIsNone(enrollment.student)
+        enrollment = BatchEnrollment.objects.get(batch=self.batch, student__name='Asha Kumar')
+        self.assertIsNotNone(enrollment.student)
+        self.assertEqual(enrollment.student.name, 'Asha Kumar')
+        self.assertEqual(enrollment.student.source_type, 'B2C')
         self.assertEqual(enrollment.display_name, 'Asha Kumar')
-        self.assertEqual(enrollment.guest_occupation, 'Engineer')
-        self.assertEqual(enrollment.guest_source, 'Instagram ad')
+        self.assertEqual(enrollment.occupation, 'Engineer')
+        self.assertEqual(enrollment.lead_source, 'Instagram ad')
         installments = list(enrollment.installments.order_by('sequence'))
         self.assertEqual(installments[0].paid_status, 'paid')
         self.assertEqual(installments[1].paid_status, 'pending')
 
-        vikram_enrollment = BatchEnrollment.objects.get(batch=self.batch, guest_name='Vikram Rao')
-        self.assertIsNone(vikram_enrollment.student)
+        vikram_enrollment = BatchEnrollment.objects.get(batch=self.batch, student__name='Vikram Rao')
+        self.assertIsNotNone(vikram_enrollment.student)
         self.assertEqual(
             list(vikram_enrollment.installments.order_by('sequence').values_list('paid_status', flat=True)),
             ['pending', 'pending'],
         )
 
-    def test_import_does_not_link_an_existing_registered_student(self):
-        # Even if someone with this exact name + phone is already a registered
-        # student, import must still create a guest row, never link/reuse them.
-        Student.objects.create(name='Asha Kumar', grade='6', parent_phone_number='98765 43210', source_type='B2C')
+    def test_import_links_an_existing_registered_student_by_name_and_phone(self):
+        # Someone with this exact name + phone is already a registered student —
+        # import must link them, not create a duplicate Student record.
+        existing = Student.objects.create(name='Asha Kumar', grade='6', parent_phone_number='98765 43210', source_type='B2C')
         file_obj = self._make_excel([['Asha Kumar', '9876543210', '', '', '', '']])
         response = self._import(self.batch.id, file_obj)
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data['enrolled'], 1)
         self.assertEqual(Student.objects.count(), 1)
         enrollment = BatchEnrollment.objects.get(batch=self.batch)
-        self.assertIsNone(enrollment.student)
-        self.assertEqual(enrollment.guest_name, 'Asha Kumar')
+        self.assertEqual(enrollment.student_id, existing.id)
+        self.assertEqual(enrollment.student.name, 'Asha Kumar')
+
+    def test_import_grade_column_is_used_when_creating_a_new_student(self):
+        file_obj = self._make_excel(
+            [['New Kid', '9876543210', '7', '', '', '']],
+            headers=['Name', 'Phone Number', 'Grade', 'Occupation', 'Email', 'How did you know about us?', 'Payment Status'],
+        )
+        response = self._import(self.batch.id, file_obj)
+        self.assertEqual(response.status_code, 200, response.data)
+        student = Student.objects.get(name='New Kid')
+        self.assertEqual(student.grade, '7')
+
+    def test_import_parent_name_and_place_columns_are_used_when_creating_a_new_student(self):
+        file_obj = self._make_excel(
+            [['New Kid', '9876543210', 'Meera Rao', 'Chennai']],
+            headers=['Name', 'Phone Number', 'Parent Name', 'Place'],
+        )
+        response = self._import(self.batch.id, file_obj)
+        self.assertEqual(response.status_code, 200, response.data)
+        student = Student.objects.get(name='New Kid')
+        self.assertEqual(student.parent_name, 'Meera Rao')
+        self.assertEqual(student.place, 'Chennai')
+
+    def test_import_parent_name_and_place_are_not_used_when_matching_an_existing_student(self):
+        # A match must never silently overwrite the existing student's own details with
+        # whatever happened to be typed on this particular import row.
+        existing = Student.objects.create(
+            name='Asha Kumar', grade='6', parent_phone_number='98765 43210', source_type='B2C',
+            parent_name='Original Parent', place='Original Place',
+        )
+        file_obj = self._make_excel(
+            [['Asha Kumar', '9876543210', 'Different Parent', 'Different Place']],
+            headers=['Name', 'Phone Number', 'Parent Name', 'Place'],
+        )
+        response = self._import(self.batch.id, file_obj)
+        self.assertEqual(response.status_code, 200, response.data)
+        existing.refresh_from_db()
+        self.assertEqual(existing.parent_name, 'Original Parent')
+        self.assertEqual(existing.place, 'Original Place')
 
     def test_import_skips_row_missing_name(self):
         file_obj = self._make_excel([['', '9876543210', '', '', '', '']])
@@ -483,21 +551,23 @@ class BatchEnrollmentEditingTests(APITestCase):
         force_authenticate(request, user=self.admin)
         return request
 
-    def test_patch_updates_guest_fields(self):
+    def test_patch_updates_lead_info_fields(self):
+        # Name/phone aren't editable here anymore — they live on the linked Student now.
+        # Occupation/email/source are the lead-tracking fields still on the enrollment.
         enrollment = BatchEnrollment.objects.create(
-            batch=self.batch, guest_name='Typo Kid', guest_phone_number='9000000000',
+            batch=self.batch, student=_make_student('Regular Kid'), occupation='Student',
             joined_date=datetime.date(2026, 7, 1),
         )
-        request = self._req('patch', f'/api/batch-enrollments/{enrollment.id}/', {'guest_name': 'Fixed Kid'})
+        request = self._req('patch', f'/api/batch-enrollments/{enrollment.id}/', {'occupation': 'Engineer'})
         response = BatchEnrollmentViewSet.as_view({'patch': 'partial_update'})(request, pk=enrollment.id)
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data['guest_name'], 'Fixed Kid')
-        self.assertEqual(response.data['student_name'], 'Fixed Kid')
+        self.assertEqual(response.data['occupation'], 'Engineer')
+        self.assertEqual(response.data['student_name'], 'Regular Kid')
 
     def test_patch_cannot_reassign_batch_or_student(self):
         other_batch = _make_batch(payment_type='one_time')
         enrollment = BatchEnrollment.objects.create(
-            batch=self.batch, guest_name='Kid', joined_date=datetime.date(2026, 7, 1),
+            batch=self.batch, student=_make_student('Kid'), joined_date=datetime.date(2026, 7, 1),
         )
         request = self._req('patch', f'/api/batch-enrollments/{enrollment.id}/', {'batch': other_batch.id})
         response = BatchEnrollmentViewSet.as_view({'patch': 'partial_update'})(request, pk=enrollment.id)
@@ -505,7 +575,7 @@ class BatchEnrollmentEditingTests(APITestCase):
 
     def test_delete_removes_enrollment(self):
         enrollment = BatchEnrollment.objects.create(
-            batch=self.batch, guest_name='Kid', joined_date=datetime.date(2026, 7, 1),
+            batch=self.batch, student=_make_student('Kid'), joined_date=datetime.date(2026, 7, 1),
         )
         create_batch_installments(enrollment)
         request = self.factory.delete(f'/api/batch-enrollments/{enrollment.id}/')
@@ -729,48 +799,30 @@ class BatchInstallmentStatusGuardTests(APITestCase):
 
 
 class BatchEnrollmentDuplicateRaceTests(APITestCase):
-    """A guest enrollment previously had no DB-level uniqueness backstop at all —
-    only the app-level dedup check in BatchEnrollmentViewSet.create(), which two
-    near-simultaneous submissions could both pass. See BatchEnrollment.Meta.constraints.
+    """Two near-simultaneous "add student" submissions for the same name+phone both
+    resolve (via find_or_create_student) to the same Student, so unique_together
+    ('batch', 'student') — see BatchEnrollment.Meta — is the real backstop against a
+    double-enroll race, not just the app-level dedup check in
+    BatchEnrollmentViewSet.create().
     """
 
-    def test_db_rejects_a_duplicate_guest_enrollment(self):
+    def test_db_rejects_a_duplicate_enrollment_for_the_same_student(self):
         from django.db import IntegrityError
 
         batch = _make_batch()
-        BatchEnrollment.objects.create(
-            batch=batch, student=None, guest_name='Same Guest', guest_phone_number='9000000000',
-            joined_date=datetime.date(2026, 7, 1),
-        )
+        student = _make_student('Same Student')
+        BatchEnrollment.objects.create(batch=batch, student=student, joined_date=datetime.date(2026, 7, 1))
         with self.assertRaises(IntegrityError):
-            BatchEnrollment.objects.create(
-                batch=batch, student=None, guest_name='Same Guest', guest_phone_number='9000000000',
-                joined_date=datetime.date(2026, 7, 1),
-            )
+            BatchEnrollment.objects.create(batch=batch, student=student, joined_date=datetime.date(2026, 7, 1))
 
-    def test_guests_with_the_same_name_and_no_phone_are_not_blocked(self):
-        # Two different people can share a common name with no phone on file —
-        # the constraint excludes a blank guest_phone_number specifically so this
-        # isn't wrongly treated as a duplicate.
-        batch = _make_batch()
-        BatchEnrollment.objects.create(
-            batch=batch, student=None, guest_name='Common Name', guest_phone_number='',
-            joined_date=datetime.date(2026, 7, 1),
-        )
-        BatchEnrollment.objects.create(
-            batch=batch, student=None, guest_name='Common Name', guest_phone_number='',
-            joined_date=datetime.date(2026, 7, 1),
-        )
-        self.assertEqual(BatchEnrollment.objects.filter(guest_name='Common Name').count(), 2)
-
-    def test_create_view_returns_a_clean_400_not_a_500_for_a_duplicate_guest(self):
-        admin = get_user_model().objects.create_user(username='dup_guest_admin', password='x', is_staff=True)
+    def test_create_view_returns_a_clean_400_not_a_500_for_a_duplicate(self):
+        admin = get_user_model().objects.create_user(username='dup_add_admin', password='x', is_staff=True)
         batch = _make_batch()
         factory = APIRequestFactory()
 
         def _create():
             request = factory.post('/api/batch-enrollments/', {
-                'batch': batch.id, 'guest_name': 'Race Guest', 'guest_phone_number': '9111111111',
+                'batch': batch.id, 'name': 'Race Guest', 'phone_number': '9111111111',
             })
             force_authenticate(request, user=admin)
             return BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
@@ -779,7 +831,7 @@ class BatchEnrollmentDuplicateRaceTests(APITestCase):
         self.assertEqual(first.status_code, 201, first.data)
         second = _create()
         self.assertEqual(second.status_code, 400)
-        self.assertEqual(BatchEnrollment.objects.filter(guest_name='Race Guest').count(), 1)
+        self.assertEqual(BatchEnrollment.objects.filter(batch=batch, student__name='Race Guest').count(), 1)
 
 
 class BatchGrossExpectedReflectsCorrectionsTests(TestCase):
@@ -801,24 +853,36 @@ class BatchGrossExpectedReflectsCorrectionsTests(TestCase):
 
 
 class BatchExportEscapesFormulaLookingFieldsTests(TestCase):
-    """Guest free text (name/phone/occupation/email/source) originates from a
-    public Google Form or the enroll form directly — a value starting with
-    =+-@ is written as a defused literal string, mirroring reports.views.csv_safe().
+    """Free text (student name, occupation/email/source) originates from a public
+    Google Form or the enroll form directly — a value starting with =+-@ is written
+    as a defused literal string, mirroring reports.views.csv_safe().
     """
 
-    def test_formula_looking_guest_name_is_escaped_in_the_export(self):
+    def test_formula_looking_student_name_is_escaped_in_the_export(self):
         from .services import build_export_workbook
 
         batch = _make_batch()
-        BatchEnrollment.objects.create(
-            batch=batch, student=None, guest_name='=SUM(A1:A9)', guest_phone_number='9000000000',
-            joined_date=datetime.date(2026, 7, 1),
-        )
+        student = Student.objects.create(name='=SUM(A1:A9)', grade='5', source_type='B2C')
+        BatchEnrollment.objects.create(batch=batch, student=student, joined_date=datetime.date(2026, 7, 1))
         buffer = build_export_workbook(batch)
         workbook = load_workbook(buffer)
         sheet = workbook.active
         name_cell = sheet.cell(row=2, column=1).value
         self.assertEqual(name_cell, "'=SUM(A1:A9)")
+
+    def test_formula_looking_source_is_escaped_in_the_export(self):
+        from .services import build_export_workbook
+
+        batch = _make_batch()
+        student = _make_student('Normal Kid')
+        BatchEnrollment.objects.create(
+            batch=batch, student=student, lead_source='=SUM(A1:A9)', joined_date=datetime.date(2026, 7, 1),
+        )
+        buffer = build_export_workbook(batch)
+        workbook = load_workbook(buffer)
+        sheet = workbook.active
+        source_cell = sheet.cell(row=2, column=6).value
+        self.assertEqual(source_cell, "'=SUM(A1:A9)")
 
 
 class BatchImportFileSizeCapTests(APITestCase):
@@ -865,17 +929,18 @@ class BatchDeleteTests(APITestCase):
 
 
 class SourceReportTests(TestCase):
-    def test_source_report_aggregates_guest_enrollments_by_source(self):
+    def test_source_report_aggregates_enrollments_by_source(self):
         batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
-        e1 = BatchEnrollment.objects.create(batch=batch, guest_name='A', guest_source='Instagram ad', joined_date=datetime.date(2026, 7, 1))
+        e1 = BatchEnrollment.objects.create(batch=batch, student=_make_student('A'), lead_source='Instagram ad', joined_date=datetime.date(2026, 7, 1))
         create_batch_installments(e1)
-        e2 = BatchEnrollment.objects.create(batch=batch, guest_name='B', guest_source='Instagram ad', joined_date=datetime.date(2026, 7, 1))
+        e2 = BatchEnrollment.objects.create(batch=batch, student=_make_student('B'), lead_source='Instagram ad', joined_date=datetime.date(2026, 7, 1))
         inst2 = create_batch_installments(e2)[0]
         inst2.paid_status = 'paid'
         inst2.save()
-        e3 = BatchEnrollment.objects.create(batch=batch, guest_name='C', guest_source='Referral', joined_date=datetime.date(2026, 7, 1))
+        e3 = BatchEnrollment.objects.create(batch=batch, student=_make_student('C'), lead_source='Referral', joined_date=datetime.date(2026, 7, 1))
         create_batch_installments(e3)
-        # A registered-student add has no source at all — grouped separately.
+        # A registered-student add with no source at all is still counted — grouped
+        # under "Not recorded", not dropped.
         e4 = BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
         create_batch_installments(e4)
 
@@ -884,42 +949,8 @@ class SourceReportTests(TestCase):
         self.assertEqual(report['Instagram ad']['collected'], Decimal('4000.00'))
         self.assertEqual(report['Instagram ad']['pending'], Decimal('4000.00'))
         self.assertEqual(report['Referral']['enrolled_count'], 1)
-        # A registered-student add (e4) has no guest_source at all — never appears
-        # under a named source, and source_report() only looks at guest rows anyway.
-        self.assertEqual(set(report), {'Instagram ad', 'Referral'})
-
-
-class ConvertGuestToStudentTests(APITestCase):
-    def setUp(self):
-        self.admin = get_user_model().objects.create_user(username='convert_admin', password='x', is_staff=True)
-        self.factory = APIRequestFactory()
-
-    def test_converts_guest_to_registered_student(self):
-        batch = _make_batch(payment_type='one_time')
-        enrollment = BatchEnrollment.objects.create(
-            batch=batch, guest_name='Future Regular', guest_phone_number='9123456789',
-            joined_date=datetime.date(2026, 7, 1),
-        )
-        request = self.factory.post(f'/api/batch-enrollments/{enrollment.id}/convert_to_student/', {}, format='json')
-        force_authenticate(request, user=self.admin)
-        response = BatchEnrollmentViewSet.as_view({'post': 'convert_to_student'})(request, pk=enrollment.id)
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertIsNotNone(response.data['student'])
-        self.assertFalse(response.data['is_guest'])
-
-        enrollment.refresh_from_db()
-        self.assertIsNotNone(enrollment.student)
-        self.assertEqual(enrollment.student.name, 'Future Regular')
-        self.assertEqual(enrollment.student.parent_phone_number, '9123456789')
-        self.assertEqual(enrollment.student.source_type, 'B2C')
-
-    def test_cannot_convert_an_already_registered_enrollment(self):
-        batch = _make_batch(payment_type='one_time')
-        enrollment = BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
-        request = self.factory.post(f'/api/batch-enrollments/{enrollment.id}/convert_to_student/', {}, format='json')
-        force_authenticate(request, user=self.admin)
-        response = BatchEnrollmentViewSet.as_view({'post': 'convert_to_student'})(request, pk=enrollment.id)
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(report['Not recorded']['enrolled_count'], 1)
+        self.assertEqual(set(report), {'Instagram ad', 'Referral', 'Not recorded'})
 
 
 class ExportStudentsTests(APITestCase):
@@ -928,8 +959,7 @@ class ExportStudentsTests(APITestCase):
         factory = APIRequestFactory()
         batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
         enrollment = BatchEnrollment.objects.create(
-            batch=batch, guest_name='Exportable Kid', guest_phone_number='9000000001',
-            joined_date=datetime.date(2026, 7, 1),
+            batch=batch, student=_make_student('Exportable Kid'), joined_date=datetime.date(2026, 7, 1),
         )
         create_batch_installments(enrollment)
 
@@ -944,6 +974,36 @@ class ExportStudentsTests(APITestCase):
         self.assertEqual(rows[0][0], 'Name')
         self.assertEqual(rows[1][0], 'Exportable Kid')
 
+    def test_export_includes_lead_info_for_a_registered_enrollment(self):
+        # Occupation/Email/Source are captured on every enrollment now — the export
+        # must show them for a linked-student row, not just for a legacy guest row.
+        # Name/phone come from the linked Student itself.
+        admin = get_user_model().objects.create_user(username='export_lead_admin', password='x', is_staff=True)
+        factory = APIRequestFactory()
+        batch = _make_batch(payment_type='one_time', fee=Decimal('4000'))
+        student = Student.objects.create(
+            name='Registered Kid', grade='5', source_type='B2C', parent_phone_number='9000000002',
+        )
+        enrollment = BatchEnrollment.objects.create(
+            batch=batch, student=student, occupation='Teacher', contact_email='kid@example.com',
+            lead_source='Referral', joined_date=datetime.date(2026, 7, 1),
+        )
+        create_batch_installments(enrollment)
+
+        request = factory.get(f'/api/batches/{batch.id}/export_students/')
+        force_authenticate(request, user=admin)
+        response = BatchViewSet.as_view({'get': 'export_students'})(request, pk=batch.id)
+        self.assertEqual(response.status_code, 200)
+
+        workbook = load_workbook(BytesIO(b''.join(response.streaming_content) if response.streaming else response.content))
+        header = list(workbook.active.iter_rows(values_only=True))[0]
+        row = dict(zip(header, list(workbook.active.iter_rows(values_only=True))[1]))
+        self.assertEqual(row['Name'], 'Registered Kid')
+        self.assertEqual(row['Phone Number'], '9000000002')
+        self.assertEqual(row['Occupation'], 'Teacher')
+        self.assertEqual(row['Email'], 'kid@example.com')
+        self.assertEqual(row['How did you know about us?'], 'Referral')
+
 
 class AcceptingEnrollmentsTests(APITestCase):
     def setUp(self):
@@ -954,7 +1014,7 @@ class AcceptingEnrollmentsTests(APITestCase):
         batch = _make_batch(payment_type='one_time')
         batch.accepting_enrollments = False
         batch.save()
-        request = self.factory.post('/api/batch-enrollments/', {'batch': batch.id, 'guest_name': 'Late Kid'}, format='json')
+        request = self.factory.post('/api/batch-enrollments/', {'batch': batch.id, 'name': 'Late Kid'}, format='json')
         force_authenticate(request, user=self.admin)
         response = BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
         self.assertEqual(response.status_code, 400)

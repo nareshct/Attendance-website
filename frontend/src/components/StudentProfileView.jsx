@@ -365,10 +365,14 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
             <div>
               <dt className="text-text-secondary">Client</dt>
               <dd>
-                {profile.client ? (
-                  <Link to={`/admin/clients/${profile.client}`} className="text-primary hover:underline focus-ring">{profile.client_name}</Link>
+                {profile.source_type === 'B2B' ? (
+                  profile.client ? (
+                    <Link to={`/admin/clients/${profile.client}`} className="text-primary hover:underline focus-ring">{profile.client_name}</Link>
+                  ) : (
+                    profile.client_name || '—'
+                  )
                 ) : (
-                  profile.client_name || '—'
+                  'Own'
                 )}
               </dd>
             </div>
@@ -477,7 +481,7 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
         </Modal>
       )}
 
-      <h2 className="text-lg font-semibold text-navy mb-3">Batch history</h2>
+      <h2 className="text-lg font-semibold text-navy mb-3">Enrollments</h2>
       {downloadReportError && <p className="text-error text-xs mb-3">{downloadReportError}</p>}
       {downloadCertificateError && <p className="text-error text-xs mb-3">{downloadCertificateError}</p>}
       <div className="space-y-3">
@@ -662,6 +666,63 @@ export function StudentProfileView({ studentId, backTo, backLabel, allowTransfer
         ))}
         {profile.enrollments.length === 0 && <p className="text-text-tertiary text-sm">No enrollments yet.</p>}
       </div>
+
+      {allowEdit && profile.batch_enrollments && (
+        <>
+          <h2 className="text-lg font-semibold text-navy mb-3 mt-8">Batches</h2>
+          <div className="space-y-3">
+            {profile.batch_enrollments.map((be) => (
+              <Card key={be.id}>
+                <div className="flex items-center justify-between mb-1">
+                  <Link to={`/admin/batches/${be.batch}`} className="font-medium text-primary hover:underline focus-ring">
+                    {be.batch_name}
+                  </Link>
+                  <Badge status={be.status} />
+                </div>
+                <p className="text-sm text-text-secondary mb-2">
+                  {be.course_name} · joined {formatDate(be.joined_date)}
+                </p>
+                {be.status === 'withdrawn' && Number(be.refunded_amount) > 0 && (
+                  <p className="text-xs text-error mb-2">
+                    Refunded ₹{be.refunded_amount}{be.refund_note && ` — ${be.refund_note}`}
+                  </p>
+                )}
+                {be.installments.length > 0 && (
+                  <table className="table-compact">
+                    <thead>
+                      <tr>
+                        <th className="table-compact-head-cell">Due</th>
+                        <th className="table-compact-head-cell">Amount</th>
+                        <th className="table-compact-head-cell">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {be.installments.map((inst) => (
+                        <tr key={inst.id} className="table-compact-row">
+                          <td className="table-compact-cell">
+                            {inst.due_at_sessions === null ? 'At signup' : `By session ${inst.due_at_sessions}`}
+                          </td>
+                          <td className="table-compact-cell tabular-nums">₹{inst.amount}</td>
+                          <td className="table-compact-cell">
+                            {inst.paid_status === 'paid' ? (
+                              <span className="text-success">Paid{inst.paid_date ? ` on ${formatDate(inst.paid_date)}` : ''}</span>
+                            ) : inst.paid_status === 'cancelled' ? (
+                              <span className="text-text-tertiary">Cancelled</span>
+                            ) : (
+                              <span className="text-warning">Pending</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Card>
+            ))}
+            {profile.batch_enrollments.length === 0 && <p className="text-text-tertiary text-sm">No batches yet.</p>}
+          </div>
+        </>
+      )}
 
       <ConfirmDialog
         open={deleteSessionTarget != null}

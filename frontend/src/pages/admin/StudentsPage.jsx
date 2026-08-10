@@ -21,6 +21,8 @@ export default function StudentsPage() {
   const pickerSearch = usePickerSearch()
   const [clients, setClients] = useState([])
   const [enrollments, setEnrollments] = useState([])
+  const [batches, setBatches] = useState([])
+  const [batchEnrollments, setBatchEnrollments] = useState([])
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusTab, setStatusTab] = useState('active')
@@ -57,6 +59,25 @@ export default function StudentsPage() {
     // SearchableSelect and so isn't converted to search-as-you-type here.
     api('/api/clients/').then(setClients).catch(() => {})
     api('/api/enrollments/').then(setEnrollments).catch(() => {})
+    // The batch catalog itself stays small (a handful to a few dozen), unlike batch
+    // *enrollments* below — safe to fetch unbounded, same as courses/trainers elsewhere.
+    api('/api/batches/').then(setBatches).catch(() => {})
+    // /api/batch-enrollments/ is paginated and — unlike 1:1 enrollments — a single batch
+    // alone can easily hold 100+ rows (a real Excel import already has), so this walks
+    // every page explicitly rather than risking api()'s fail-loud "more results than
+    // fetched" guard on a plain unbounded call.
+    async function loadAllBatchEnrollments() {
+      let page = 1
+      let all = []
+      for (;;) {
+        const data = await api(`/api/batch-enrollments/?page=${page}`, { raw: true })
+        all = all.concat(data.results)
+        if (!data.next) break
+        page += 1
+      }
+      setBatchEnrollments(all)
+    }
+    loadAllBatchEnrollments().catch(() => {})
   }, [api])
 
   const studentTrainerIds = {}
@@ -75,6 +96,30 @@ export default function StudentsPage() {
       (e.status === current.status && e.start_date > current.start_date)
     ) {
       studentPrimaryEnrollment[e.student] = e
+    }
+  }
+
+  // Same "one row per student" idea as studentPrimaryEnrollment above, but for group
+  // batches (see the batches app) — a student can be in a batch instead of, or as well
+  // as, a 1:1 Enrollment, and the Course/Batch column below previously only ever looked
+  // at 1:1 enrollments, so a batch-only student always showed "—".
+  const batchesById = Object.fromEntries(batches.map((b) => [b.id, b]))
+  const studentPrimaryBatchEnrollment = {}
+  for (const be of batchEnrollments) {
+    // Also feeds the "All classes" filter below, so a batch-only student's course
+    // still matches it — batches have no single trainer to add to studentTrainerIds
+    // the same way (trainer_names is free text, not a trainer id), so the "All
+    // trainers" filter still only ever matches 1:1 enrollments.
+    const courseId = batchesById[be.batch]?.course
+    if (courseId != null) (studentCourseIds[be.student] ??= new Set()).add(courseId)
+
+    const current = studentPrimaryBatchEnrollment[be.student]
+    if (
+      !current ||
+      (be.status === 'active' && current.status !== 'active') ||
+      (be.status === current.status && be.joined_date > current.joined_date)
+    ) {
+      studentPrimaryBatchEnrollment[be.student] = be
     }
   }
 
@@ -266,14 +311,22 @@ export default function StudentsPage() {
                 </td>
                 <td className="table-cell">{s.source_type === 'B2B' ? (s.client_name || '—') : 'Own'}</td>
                 <td className="table-cell">
-                  {studentPrimaryEnrollment[s.id]
-                    ? `${studentPrimaryEnrollment[s.id].course_name} — Batch ${studentPrimaryEnrollment[s.id].batch_number}`
-                    : '—'}
+                  {studentPrimaryEnrollment[s.id] ? (
+                    `${studentPrimaryEnrollment[s.id].course_name} — Batch ${studentPrimaryEnrollment[s.id].batch_number}`
+                  ) : studentPrimaryBatchEnrollment[s.id] ? (
+                    `${batchesById[studentPrimaryBatchEnrollment[s.id].batch]?.course_name || '—'} — ${batchesById[studentPrimaryBatchEnrollment[s.id].batch]?.name || 'batch'}`
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td className="table-cell tabular-nums">
-                  {studentPrimaryEnrollment[s.id]
-                    ? `${studentPrimaryEnrollment[s.id].classes_completed}/${studentPrimaryEnrollment[s.id].classes_total}`
-                    : '—'}
+                  {studentPrimaryEnrollment[s.id] ? (
+                    `${studentPrimaryEnrollment[s.id].classes_completed}/${studentPrimaryEnrollment[s.id].classes_total}`
+                  ) : studentPrimaryBatchEnrollment[s.id] ? (
+                    <span className="text-text-tertiary text-xs">not tracked per student</span>
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td className="table-cell text-right">
                   {s.status === 'active' ? (

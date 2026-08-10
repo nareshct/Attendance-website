@@ -15,8 +15,6 @@ from rest_framework.viewsets import ModelViewSet
 from audit.services import log_action
 from config.permissions import IsAdmin, IsAdminOrTrainer, IsTrainer
 
-from students.models import Student
-
 from .models import Batch, BatchEnrollment, BatchInstallment, BatchPayout, BatchSession
 from .serializers import (
     BatchEnrollmentSerializer,
@@ -33,6 +31,7 @@ from .services import (
     build_export_workbook,
     build_import_template,
     create_batch_installments,
+    find_or_create_student,
     import_students_from_excel,
     source_report,
 )
@@ -59,7 +58,7 @@ class BatchViewSet(ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def source_breakdown(self, request):
-        """Enrollment count + revenue by how each guest heard about the center —
+        """Enrollment count + revenue by how each student heard about the center —
         the ROI signal for comparing ad channels. See services.source_report."""
         return Response(source_report())
 
@@ -200,7 +199,7 @@ class BatchEnrollmentViewSet(ModelViewSet):
     permission_classes = [IsAdmin]
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
     filter_backends = [filters.SearchFilter]
-    search_fields = ['guest_name', 'student__name']
+    search_fields = ['student__name']
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -223,62 +222,57 @@ class BatchEnrollmentViewSet(ModelViewSet):
     def create(self, request, *args, **kwargs):
         batch_id = request.data.get('batch')
         student_id = request.data.get('student') or None
-        guest_name = (request.data.get('guest_name') or '').strip()
-        guest_phone = (request.data.get('guest_phone_number') or '').strip()
+        name = (request.data.get('name') or '').strip()
+        phone = (request.data.get('phone_number') or '').strip()
+        grade = (request.data.get('grade') or '').strip()
+        parent_name = (request.data.get('parent_name') or '').strip()
+        place = (request.data.get('place') or '').strip()
 
         batch = Batch.objects.filter(id=batch_id).first()
         if batch is None:
             return Response({'detail': 'Select a batch.'}, status=status.HTTP_400_BAD_REQUEST)
         if not batch.accepting_enrollments:
             return Response({'detail': 'This batch is closed to new enrollments.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not student_id and not guest_name:
+        if not student_id and not name:
             return Response(
                 {'detail': 'Select an existing student, or enter a name for someone not in the system.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if student_id and guest_name:
+        if student_id and name:
             return Response(
                 {'detail': 'Choose either an existing student or a new name — not both.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if student_id and BatchEnrollment.objects.filter(batch_id=batch_id, student_id=student_id).exists():
+        # A name typed in here always resolves to a real, registered Student — matched
+        # by name+phone against everyone already registered, or created fresh if no
+        # match — so this enrollment ends up linked to one just like the "existing
+        # student" path, never just a name/phone captured on the enrollment itself. See
+        # find_or_create_student().
+        if name:
+            student, _ = find_or_create_student(name, phone, grade, parent_name, place)
+            student_id = student.id
+        if BatchEnrollment.objects.filter(batch_id=batch_id, student_id=student_id).exists():
             return Response({'detail': 'This student is already enrolled in this batch.'}, status=status.HTTP_400_BAD_REQUEST)
-        if guest_name and guest_phone:
-            # Same name+phone dedup rule as the Excel import (see
-            # services.import_students_from_excel) — a guest has no unique_together
-            # guard to lean on since student=None, so this has to be checked explicitly.
-            phone_digits = re.sub(r'\D', '', guest_phone)
-            same_name_guests = BatchEnrollment.objects.filter(
-                batch_id=batch_id, student__isnull=True, guest_name__iexact=guest_name,
-            ).values_list('guest_phone_number', flat=True)
-            if phone_digits and any(re.sub(r'\D', '', p) == phone_digits for p in same_name_guests):
-                return Response(
-                    {'detail': f'{guest_name} is already enrolled in this batch.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
         serializer = self.get_serializer(data={
             'batch': batch_id,
             'student': student_id,
-            'guest_name': guest_name,
-            'guest_phone_number': guest_phone,
-            'guest_email': request.data.get('guest_email', ''),
-            'guest_occupation': request.data.get('guest_occupation', ''),
-            'guest_source': request.data.get('guest_source', ''),
+            'contact_email': request.data.get('contact_email', ''),
+            'occupation': request.data.get('occupation', ''),
+            'lead_source': request.data.get('lead_source', ''),
             'joined_date': date.today().isoformat(),
         })
         serializer.is_valid(raise_exception=True)
-        # The checks above are dedupe hints, not a lock — two near-simultaneous
-        # submissions for the same student/guest can both pass them and then race on
-        # the actual insert. unique_together('batch','student') and the guest
-        # UniqueConstraint (see BatchEnrollment.Meta) are the real backstop; catch the
-        # resulting IntegrityError here and turn it into the same clean 400 instead of
-        # an unhandled 500.
+        # The check above is a dedupe hint, not a lock — two near-simultaneous
+        # submissions for the same student can both pass it and then race on the actual
+        # insert. unique_together('batch','student') (see BatchEnrollment.Meta) is the
+        # real backstop; catch the resulting IntegrityError here and turn it into the
+        # same clean 400 instead of an unhandled 500.
         try:
             enrollment = serializer.save(joined_date=date.today())
         except IntegrityError:
             return Response(
-                {'detail': f'{guest_name or "This student"} is already enrolled in this batch.'},
+                {'detail': f'{name or "This student"} is already enrolled in this batch.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         create_batch_installments(enrollment)
@@ -319,23 +313,6 @@ class BatchEnrollmentViewSet(ModelViewSet):
         enrollment.save(update_fields=['status'])
         enrollment.installments.filter(paid_status='cancelled').update(paid_status='pending')
         log_action(request.user, 'batch_reactivate', f'{enrollment.display_name} — {enrollment.batch.name}', '')
-        return Response(BatchEnrollmentSerializer(enrollment).data)
-
-    @action(detail=True, methods=['post'])
-    def convert_to_student(self, request, pk=None):
-        """Register a guest enrollment as a full Student, using the details already
-        captured at signup — for a guest who's stuck around and now needs a proper
-        record (e.g. joining another batch, or 1-on-1 classes)."""
-        enrollment = self.get_object()
-        if enrollment.student_id is not None:
-            return Response({'detail': 'This enrollment is already linked to a registered student.'}, status=status.HTTP_400_BAD_REQUEST)
-        student = Student.objects.create(
-            name=enrollment.guest_name, grade='', parent_phone_number=enrollment.guest_phone_number,
-            source_type='B2C', client=None,
-        )
-        enrollment.student = student
-        enrollment.save(update_fields=['student'])
-        log_action(request.user, 'batch_convert_guest', f'{enrollment.guest_name} — {enrollment.batch.name}', f'now {student.student_id}')
         return Response(BatchEnrollmentSerializer(enrollment).data)
 
 

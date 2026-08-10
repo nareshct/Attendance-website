@@ -7,13 +7,15 @@ from django.db import transaction
 from django.db.models import Count, Sum
 from openpyxl import Workbook, load_workbook
 
+from students.models import Student
+
 from .models import PAYMENT_MILESTONES, Batch, BatchEnrollment, BatchInstallment
 
 
 # Mirrors reports.views.csv_safe() — a cell starting with =, +, -, or @ is executed as
-# a formula by Excel when opened. guest_name/phone/occupation/email/source here
-# originate from a public Google Form (via import_students_from_excel) or the enroll
-# form directly, so nothing stops one from starting with one of those characters.
+# a formula by Excel when opened. The student name/phone and occupation/email/source
+# here originate from a public Google Form (via import_students_from_excel) or the
+# enroll form directly, so nothing stops one from starting with one of those characters.
 # openpyxl writes these as typed string cells (not CSV plain text), so the practical
 # risk is lower than reports/'s CSV exports, but the fix is free and keeps this
 # consistent with the rest of the app's exports.
@@ -103,18 +105,18 @@ def batch_revenue_summary(batch):
 
 
 def source_report():
-    """Enrollment count + revenue broken down by guest_source (how each guest heard
-    about the center) — the ROI signal for ad-driven batch sign-ups. Only guest rows
-    carry a source (a registered student added the normal way doesn't), grouped under
-    "Not recorded" here. Two aggregate queries, not one per source."""
+    """Enrollment count + revenue broken down by lead_source (how they heard about the
+    center) — the ROI signal for ad-driven batch sign-ups. Covers every enrollment, not
+    just ones without a linked student — lead_source is lead-tracking info kept
+    alongside the (always-linked) student now, not a marker of registration status. An
+    enrollment added via the "existing student" picker has no source at all, grouped
+    under "Not recorded" here. Two aggregate queries, not one per source."""
     counts = (
-        BatchEnrollment.objects.filter(student__isnull=True)
-        .values('guest_source').annotate(enrolled_count=Count('id')).order_by()
+        BatchEnrollment.objects.values('lead_source').annotate(enrolled_count=Count('id')).order_by()
     )
     money = (
-        BatchInstallment.objects.filter(batch_enrollment__student__isnull=True)
-        .exclude(paid_status='cancelled')
-        .values('batch_enrollment__guest_source', 'paid_status')
+        BatchInstallment.objects.exclude(paid_status='cancelled')
+        .values('batch_enrollment__lead_source', 'paid_status')
         .annotate(total=Sum('amount')).order_by()
     )
 
@@ -127,9 +129,9 @@ def source_report():
         )
 
     for row in counts:
-        bucket(row['guest_source'])['enrolled_count'] += row['enrolled_count']
+        bucket(row['lead_source'])['enrolled_count'] += row['enrolled_count']
     for row in money:
-        target = bucket(row['batch_enrollment__guest_source'])
+        target = bucket(row['batch_enrollment__lead_source'])
         key = 'collected' if row['paid_status'] == 'paid' else 'pending'
         target[key] += row['total'] or Decimal('0.00')
 
@@ -140,7 +142,12 @@ def source_report():
 # Google Form response sheet to match (extra columns like the form's own Timestamp are
 # simply ignored — matching is by header name, not position, and is punctuation/case
 # insensitive, so "How did you know about us?" and "how did you know about us" both work).
-IMPORT_COLUMNS = ['Name', 'Phone Number', 'Occupation', 'Email', 'How did you know about us?', 'Payment Status']
+# "Grade"/"Parent Name"/"Place" are optional — filled in when known, left blank
+# otherwise (same as Payment Status) — see find_or_create_student().
+IMPORT_COLUMNS = [
+    'Name', 'Phone Number', 'Grade', 'Occupation', 'Email', 'Parent Name', 'Place',
+    'How did you know about us?', 'Payment Status',
+]
 
 PAID_VALUES = {'paid', 'yes', 'y', 'true', '1'}
 
@@ -153,15 +160,45 @@ def _digits_only(value):
     return re.sub(r'\D', '', str(value or ''))
 
 
+def find_or_create_student(name, phone, grade='', parent_name='', place=''):
+    """Resolve a name typed into the batch "add student" form or an Excel import row to
+    a real, registered Student — every batch enrollment ends up linked to one, never
+    just a name/phone captured on the enrollment itself.
+
+    Matched by case-insensitive name + digit-normalized phone against every registered
+    student (not just this batch) — a phone-less name is never matched (too easy to
+    false-positive on a common name) and always creates a new Student instead. New
+    students are created B2C with no client — a batch isn't tied to one — and whatever
+    grade/parent_name/place was given (often blank; batches don't always collect these).
+    A match against an existing student never overwrites their existing details with
+    whatever was typed this time — those fields are only ever used when creating new.
+
+    Returns (student, created).
+    """
+    phone_digits = _digits_only(phone)
+    if phone_digits:
+        for candidate in Student.objects.filter(name__iexact=name.strip()):
+            if _digits_only(candidate.parent_phone_number) == phone_digits:
+                return candidate, False
+    student = Student.objects.create(
+        name=name.strip(), grade=grade.strip() if grade else '', parent_phone_number=phone.strip() if phone else '',
+        parent_name=parent_name.strip() if parent_name else '', place=place.strip() if place else '',
+        source_type='B2C', client=None,
+    )
+    return student, True
+
+
 def import_students_from_excel(batch, file_obj):
     """Bulk-enroll students into a batch from an admin-edited Excel export of a Google
     Form response sheet — see IMPORT_COLUMNS for the expected headers.
 
-    Every row becomes a guest enrollment (student=None, see BatchEnrollment.guest_*) —
-    this import never creates or links a registered Student record, even if someone
-    with the same name/phone is already registered elsewhere. A duplicate within the
-    same batch (same name + phone already imported/enrolled as a guest here) is
-    skipped rather than double-enrolled.
+    Every row is resolved to a real, registered Student via find_or_create_student() —
+    matched against everyone already registered, or created fresh — and the enrollment
+    is linked to it; the row's occupation/email/source are kept on the enrollment's own
+    occupation/contact_email/lead_source fields too, as lead-tracking info alongside the
+    real student link (name/phone aren't — Student.name/parent_phone_number are the one
+    canonical copy). A duplicate within the same batch (same name + phone resolving to
+    the same student) is skipped rather than double-enrolled.
 
     A "Paid" Payment Status marks only the first (due-at-signup) installment paid —
     matching the real workflow: the parent pays that upfront amount via the form before
@@ -200,13 +237,13 @@ def import_students_from_excel(batch, file_obj):
                 return ''
             return str(row[idx]).strip()
 
-        already_imported = set()
-        for guest_name, guest_phone in BatchEnrollment.objects.filter(
-            batch=batch, student__isnull=True,
-        ).values_list('guest_name', 'guest_phone_number'):
-            phone_digits = _digits_only(guest_phone)
-            if phone_digits:
-                already_imported.add((guest_name.strip().lower(), phone_digits))
+        # Dedup by resolved student identity now, not by raw name/phone text — a row
+        # that resolves (via find_or_create_student) to a student already enrolled here,
+        # whether from an earlier import row, a manual add, or the registered-student
+        # path, is skipped rather than double-enrolled.
+        already_enrolled_student_ids = set(
+            BatchEnrollment.objects.filter(batch=batch).values_list('student_id', flat=True)
+        )
 
         enrolled = 0
         marked_paid = 0
@@ -215,9 +252,10 @@ def import_students_from_excel(batch, file_obj):
         # Without this, an error partway through a large sheet (a bad row, a transient
         # DB error) left however many rows had already been created committed, with no
         # way to tell from the response which rows made it in — a re-run of the same
-        # file would then also skip those already-committed rows via already_imported,
-        # making the gap invisible. Wrapping the whole pass in one transaction means a
-        # failure rolls back to "nothing imported", so a retry behaves like the first attempt.
+        # file would then also skip those already-committed rows via
+        # already_enrolled_student_ids, making the gap invisible. Wrapping the whole
+        # pass in one transaction means a failure rolls back to "nothing imported", so a
+        # retry behaves like the first attempt.
         with transaction.atomic():
             for row_num, row in enumerate(rows, start=2):
                 if row is None or all(v in (None, '') for v in row):
@@ -229,22 +267,24 @@ def import_students_from_excel(batch, file_obj):
                     continue
 
                 phone = cell(row, 'Phone Number')
+                grade = cell(row, 'Grade')
                 occupation = cell(row, 'Occupation')
                 email = cell(row, 'Email')
+                parent_name = cell(row, 'Parent Name')
+                place = cell(row, 'Place')
                 source = cell(row, 'How did you know about us?')
                 payment_status = cell(row, 'Payment Status')
 
-                phone_digits = _digits_only(phone)
-                if phone_digits and (name.lower(), phone_digits) in already_imported:
+                student, _ = find_or_create_student(name, phone, grade, parent_name, place)
+                if student.id in already_enrolled_student_ids:
                     skipped.append({'row': row_num, 'reason': f'{name} is already enrolled in this batch.'})
                     continue
 
                 enrollment = BatchEnrollment.objects.create(
-                    batch=batch, student=None, guest_name=name, guest_phone_number=phone, guest_email=email,
-                    guest_occupation=occupation, guest_source=source, joined_date=date.today(), status='active',
+                    batch=batch, student=student, contact_email=email,
+                    occupation=occupation, lead_source=source, joined_date=date.today(), status='active',
                 )
-                if phone_digits:
-                    already_imported.add((name.lower(), phone_digits))
+                already_enrolled_student_ids.add(student.id)
                 installments = create_batch_installments(enrollment)
                 enrolled += 1
 
@@ -271,7 +311,7 @@ def build_import_template():
     sheet = workbook.active
     sheet.title = 'Batch import'
     sheet.append(IMPORT_COLUMNS)
-    sheet.append(['Asha Kumar', '9876543210', 'Software engineer', 'asha@example.com', 'Instagram ad', 'Paid'])
+    sheet.append(['Asha Kumar', '9876543210', '', 'Software engineer', 'asha@example.com', '', '', 'Instagram ad', 'Paid'])
     buffer = BytesIO()
     workbook.save(buffer)
     buffer.seek(0)
@@ -322,7 +362,7 @@ def build_export_workbook(batch):
     sheet = workbook.active
     sheet.title = 'Enrolled students'
     sheet.append([
-        'Name', 'Registered?', 'Student ID', 'Phone Number', 'Occupation', 'Email',
+        'Name', 'Student ID', 'Phone Number', 'Occupation', 'Email',
         'How did you know about us?', 'Status', 'Joined Date', 'Amount Paid', 'Amount Pending',
     ])
     enrollments = (
@@ -331,13 +371,13 @@ def build_export_workbook(batch):
     for e in enrollments:
         paid = sum((i.amount for i in e.installments.all() if i.paid_status == 'paid'), Decimal('0.00'))
         pending = sum((i.amount for i in e.installments.all() if i.paid_status == 'pending'), Decimal('0.00'))
-        if e.student_id:
-            row = [_xlsx_safe(e.student.name), 'Yes', e.student.student_id, _xlsx_safe(e.student.parent_phone_number), '', '', '']
-        else:
-            row = [
-                _xlsx_safe(e.guest_name), 'No', '', _xlsx_safe(e.guest_phone_number),
-                _xlsx_safe(e.guest_occupation), _xlsx_safe(e.guest_email), _xlsx_safe(e.guest_source),
-            ]
+        # Occupation/contact_email/lead_source are lead-tracking info kept on the
+        # enrollment itself for every row — see find_or_create_student(). Name/phone
+        # come straight from the linked Student — the one canonical copy.
+        row = [
+            _xlsx_safe(e.student.name), e.student.student_id, _xlsx_safe(e.student.parent_phone_number),
+            _xlsx_safe(e.occupation), _xlsx_safe(e.contact_email), _xlsx_safe(e.lead_source),
+        ]
         row += [e.status, e.joined_date.isoformat(), round(float(paid), 2), round(float(pending), 2)]
         sheet.append(row)
     buffer = BytesIO()

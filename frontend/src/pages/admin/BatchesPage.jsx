@@ -144,8 +144,8 @@ export default function BatchesPage() {
 
       <Modal open={showSourceBreakdown} onClose={() => setShowSourceBreakdown(false)} title="Revenue by source" maxWidthClass="max-w-2xl">
         <p className="text-xs text-text-tertiary mb-3">
-          Only covers guest sign-ups (walk-ins added by hand or imported from Excel) — a registered student added
-          the normal way doesn't record how they heard about the center.
+          Covers every enrollment across all batches. An enrollment added via the "existing student" picker (rather
+          than typing a name) has no source recorded, and is grouped under "Not recorded".
         </p>
         {sourceBreakdown ? (
           <table className="table-compact">
@@ -167,7 +167,7 @@ export default function BatchesPage() {
                 </tr>
               ))}
               {sourceBreakdown.length === 0 && (
-                <tr><td colSpan={4} className="table-compact-cell text-text-tertiary">No guest sign-ups yet.</td></tr>
+                <tr><td colSpan={4} className="table-compact-cell text-text-tertiary">No enrollments yet.</td></tr>
               )}
             </tbody>
           </table>

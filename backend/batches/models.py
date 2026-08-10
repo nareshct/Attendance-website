@@ -90,12 +90,15 @@ class Batch(models.Model):
 class BatchEnrollment(models.Model):
     """One student's membership (and payment plan) in a Batch.
 
-    `student` is optional — a batch can also include someone who's never been
-    registered as a Student in the system at all (e.g. a walk-in who signs up
-    straight into a batch). When `student` is None, the guest_* fields below
-    hold their details instead, doubling as a lightweight lead capture
-    (guest_source records how they heard about us) since this is often how a
-    center picks up brand-new prospects.
+    Always linked to a registered Student — see batches.services.find_or_create_student,
+    called from both the manual "add student" flow and the Excel import, which matches an
+    existing student by name+phone or creates a new one. Name/phone are never stored here
+    separately — Student.name/parent_phone_number are the one canonical copy. The
+    remaining fields below (occupation/contact_email/lead_source) capture lead-tracking
+    info that has no home on Student at all — occupation/email don't apply to most (K-12)
+    students, and lead_source ("how did you hear about us") is inherently a per-signup
+    fact, not a per-person one — a repeat student can be acquired via a different channel
+    each time they join a new batch, which is exactly what source_report() breaks down.
     """
 
     STATUS_CHOICES = [
@@ -104,12 +107,10 @@ class BatchEnrollment(models.Model):
     ]
 
     batch = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='batch_enrollments')
-    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='batch_enrollments', null=True, blank=True)
-    guest_name = models.CharField(max_length=255, blank=True, default='')
-    guest_phone_number = models.CharField(max_length=20, blank=True, default='')
-    guest_email = models.EmailField(blank=True, default='')
-    guest_occupation = models.CharField(max_length=255, blank=True, default='')
-    guest_source = models.CharField(max_length=255, blank=True, default='', help_text='How they heard about us, e.g. referral, social media, walk-in')
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='batch_enrollments')
+    contact_email = models.EmailField(blank=True, default='')
+    occupation = models.CharField(max_length=255, blank=True, default='')
+    lead_source = models.CharField(max_length=255, blank=True, default='', help_text='How they heard about us, e.g. referral, social media, walk-in')
     joined_date = models.DateField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='active')
     # Set on withdraw when money already collected needs to be handed back — subtracted
@@ -122,26 +123,10 @@ class BatchEnrollment(models.Model):
     class Meta:
         unique_together = ('batch', 'student')
         ordering = ['-joined_date']
-        constraints = [
-            # A guest (student=None) has no FK for unique_together above to lean on, so
-            # the app-level dedup check in BatchEnrollmentViewSet.create() (case-
-            # insensitive name, digit-normalized phone) was the only guard — no DB backstop
-            # meant a double-click or a re-run import could race past that check and
-            # double-enroll (and double-bill) the same guest. This won't catch every
-            # variant the app-level check does (e.g. differently-formatted phone numbers),
-            # but it closes the exact-duplicate-submission race, which is the realistic
-            # concurrent case. Excludes a blank phone number so two different guests who
-            # share a common name with no phone on file aren't wrongly blocked.
-            models.UniqueConstraint(
-                fields=['batch', 'guest_name', 'guest_phone_number'],
-                condition=models.Q(student__isnull=True) & ~models.Q(guest_phone_number=''),
-                name='unique_guest_enrollment_per_batch',
-            ),
-        ]
 
     @property
     def display_name(self):
-        return self.student.name if self.student_id else self.guest_name
+        return self.student.name
 
     def __str__(self):
         return f'{self.display_name} — {self.batch.name}'

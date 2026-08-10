@@ -3,12 +3,15 @@ import { Button } from './Button'
 import { Modal } from './Modal'
 import { useApi } from '../hooks/useApi'
 
-// Ongoing enrollments hard-block archiving (both here and server-side, see
-// StudentViewSet.archive) — a student can't be archived while still taking
-// classes. Each gets a Withdraw toggle: B2C students get optional refund
-// amount/note fields (withdrawing already auto-cancels any pending
-// installment on that enrollment, refund fields just log what was given
-// back), B2B students don't need them since there's no payment plan.
+// Ongoing enrollments and active batch enrollments both hard-block archiving
+// (both here and server-side, see StudentViewSet.archive) — a student can't
+// be archived while still taking classes, whether that's a 1:1 Enrollment or
+// a group Batch. Each gets a Withdraw toggle: for 1:1 enrollments, B2C
+// students get optional refund amount/note fields (withdrawing already
+// auto-cancels any pending installment on that enrollment, refund fields
+// just log what was given back), B2B students don't need them since there's
+// no payment plan. Batch enrollments always get refund fields regardless of
+// sourceType, since batches bill everyone the same way via fee_per_student.
 // Unpaid installments are shown too, but only ever informational — see
 // StudentViewSet.archive_blockers for why they can't block on their own.
 export function ArchiveStudentModal({ open, studentId, studentName, sourceType, onClose, onArchived }) {
@@ -46,6 +49,11 @@ export function ArchiveStudentModal({ open, studentId, studentName, sourceType, 
     setRefundForms((prev) => ({ ...prev, [enrollmentId]: { ...prev[enrollmentId], [field]: value } }))
   }
 
+  function updateBatchRefundForm(batchEnrollmentId, field, value) {
+    const key = `batch-${batchEnrollmentId}`
+    setRefundForms((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value } }))
+  }
+
   async function handleWithdraw(enrollmentId) {
     const key = `enrollment-${enrollmentId}`
     const form = refundForms[enrollmentId] || {}
@@ -57,6 +65,25 @@ export function ArchiveStudentModal({ open, studentId, studentName, sourceType, 
     setRowError(key, '')
     try {
       await api(`/api/enrollments/${enrollmentId}/withdraw/`, { method: 'POST', body })
+      await refreshBlockers()
+    } catch (err) {
+      setRowError(key, err.message)
+    } finally {
+      setBusyKey('')
+    }
+  }
+
+  async function handleBatchWithdraw(batchEnrollmentId) {
+    const key = `batch-${batchEnrollmentId}`
+    const form = refundForms[key] || {}
+    const body = {}
+    if (form.refund_amount) body.refund_amount = form.refund_amount
+    if (form.refund_note) body.refund_note = form.refund_note
+
+    setBusyKey(key)
+    setRowError(key, '')
+    try {
+      await api(`/api/batch-enrollments/${batchEnrollmentId}/withdraw/`, { method: 'POST', body })
       await refreshBlockers()
     } catch (err) {
       setRowError(key, err.message)
@@ -80,8 +107,8 @@ export function ArchiveStudentModal({ open, studentId, studentName, sourceType, 
     }
   }
 
-  const b = blockers || { ongoing_enrollments: [], pending_installments: [] }
-  const isBlocked = blockers != null && b.ongoing_enrollments.length > 0
+  const b = blockers || { ongoing_enrollments: [], active_batch_enrollments: [], pending_installments: [] }
+  const isBlocked = blockers != null && (b.ongoing_enrollments.length > 0 || b.active_batch_enrollments.length > 0)
   const hasInfo = blockers != null && b.pending_installments.length > 0
 
   return (
@@ -100,13 +127,13 @@ export function ArchiveStudentModal({ open, studentId, studentName, sourceType, 
         <div className="space-y-4">
           {isBlocked && (
             <p className="text-sm text-text-secondary">
-              {studentName} still has ongoing batches. Withdraw them below before archiving.
+              {studentName} still has ongoing enrollments or batches. Withdraw them below before archiving.
             </p>
           )}
           {!isBlocked && hasInfo && (
             <p className="text-sm text-text-secondary">
-              {studentName} has no ongoing batches. The unpaid installment(s) below don't block archiving, but
-              won't be cancelled by it either — resolve them separately if needed.
+              {studentName} has no ongoing enrollments or batches. The unpaid installment(s) below don't block
+              archiving, but won't be cancelled by it either — resolve them separately if needed.
             </p>
           )}
 
@@ -146,6 +173,50 @@ export function ArchiveStudentModal({ open, studentId, studentName, sourceType, 
                       <div className="flex items-center justify-between mt-2">
                         {rowErrors[key] && <p className="text-error text-xs">{rowErrors[key]}</p>}
                         <Button size="sm" disabled={busyKey === key} onClick={() => handleWithdraw(e.id)} className="ml-auto">
+                          {busyKey === key ? 'Withdrawing…' : 'Withdraw'}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          {b.active_batch_enrollments.length > 0 && (
+            <section>
+              <h3 className="text-sm font-semibold text-navy mb-2">
+                Active batches ({b.active_batch_enrollments.length})
+              </h3>
+              <div className="space-y-2">
+                {b.active_batch_enrollments.map((be) => {
+                  const key = `batch-${be.id}`
+                  const form = refundForms[key] || { refund_amount: '', refund_note: '' }
+                  return (
+                    <div key={be.id} className="rounded-lg border border-gray-200 p-2.5">
+                      <p className="text-sm">
+                        {be.batch_name} <span className="text-text-secondary">— {be.course_name}</span>
+                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="Refund amount (₹, optional)"
+                          value={form.refund_amount}
+                          onChange={(ev) => updateBatchRefundForm(be.id, 'refund_amount', ev.target.value)}
+                          className="input text-xs py-1.5"
+                        />
+                        <input
+                          placeholder="Refund note (optional)"
+                          value={form.refund_note}
+                          onChange={(ev) => updateBatchRefundForm(be.id, 'refund_note', ev.target.value)}
+                          className="input text-xs py-1.5"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between mt-2">
+                        {rowErrors[key] && <p className="text-error text-xs">{rowErrors[key]}</p>}
+                        <Button size="sm" disabled={busyKey === key} onClick={() => handleBatchWithdraw(be.id)} className="ml-auto">
                           {busyKey === key ? 'Withdrawing…' : 'Withdraw'}
                         </Button>
                       </div>

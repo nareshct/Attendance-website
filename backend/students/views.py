@@ -13,6 +13,8 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
 from audit.services import log_action
+from batches.models import BatchEnrollment
+from batches.serializers import BatchInstallmentSerializer
 from config.permissions import IsAdmin, IsAdminOrTrainer
 from config.throttling import ParentLinkRateThrottle
 from enrollments.certificate_pdf import render_certificate_pdf
@@ -72,6 +74,23 @@ class EnrollmentHistoryWithPaymentSerializer(EnrollmentHistorySerializer):
         return PaymentPlanSerializer(plan).data if plan else None
 
 
+class StudentBatchEnrollmentSerializer(serializers.ModelSerializer):
+    """Admin-only: a student's group-batch (see batches app) memberships, shown
+    alongside their 1:1 course enrollments on the profile page — a student can be in
+    both at once, and batches are otherwise only browsable from the Batches list."""
+
+    batch_name = serializers.CharField(source='batch.name', read_only=True)
+    course_name = serializers.CharField(source='batch.course.name', read_only=True)
+    installments = BatchInstallmentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = BatchEnrollment
+        fields = [
+            'id', 'batch', 'batch_name', 'course_name', 'status', 'joined_date',
+            'refunded_amount', 'refund_note', 'installments',
+        ]
+
+
 class StudentViewSet(ModelViewSet):
     # select_related('client') because StudentSerializer.client_name traverses
     # student.client.company_name — without it, listing B2B students triggers one extra
@@ -105,16 +124,20 @@ class StudentViewSet(ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='archive-blockers')
     def archive_blockers(self, request, pk=None):
-        """Feeds the Archive confirmation dialog. `ongoing_enrollments` hard-blocks
-        archiving (see archive() below) — a student can't be archived while still
-        taking classes, mirroring TrainerViewSet.archive. `pending_installments`
-        is informational only, not a blocker: withdrawing an ongoing enrollment
-        already auto-cancels any pending installment tied to it (see
-        EnrollmentViewSet.withdraw), so this only ever lists installments on a
-        non-ongoing (already completed) enrollment — nothing left to withdraw
-        would resolve them."""
+        """Feeds the Archive confirmation dialog. `ongoing_enrollments` and
+        `active_batch_enrollments` both hard-block archiving (see archive() below) —
+        a student can't be archived while still taking classes, whether that's a 1:1
+        Enrollment or a group Batch (see the batches app), mirroring
+        TrainerViewSet.archive. `pending_installments` is informational only, not a
+        blocker: withdrawing an ongoing enrollment already auto-cancels any pending
+        installment tied to it (see EnrollmentViewSet.withdraw), so this only ever
+        lists installments on a non-ongoing (already completed) enrollment — nothing
+        left to withdraw would resolve them."""
         student = self.get_object()
         ongoing_enrollments = student.enrollments.filter(status='ongoing').select_related('course', 'trainer').order_by('course__name')
+        active_batch_enrollments = (
+            student.batch_enrollments.filter(status='active').select_related('batch__course').order_by('batch__name')
+        )
         pending_installments = PaymentInstallment.objects.filter(
             plan__enrollment__student=student, paid_status='pending',
         ).select_related('plan__enrollment__course').order_by('plan__enrollment__course__name', 'sequence')
@@ -127,6 +150,14 @@ class StudentViewSet(ModelViewSet):
                     'batch_number': e.batch_number,
                 }
                 for e in ongoing_enrollments
+            ],
+            'active_batch_enrollments': [
+                {
+                    'id': be.id,
+                    'batch_name': be.batch.name,
+                    'course_name': be.batch.course.name,
+                }
+                for be in active_batch_enrollments
             ],
             'pending_installments': [
                 {
@@ -146,6 +177,10 @@ class StudentViewSet(ModelViewSet):
         if student.enrollments.filter(status='ongoing').exists():
             return Response(
                 {'detail': 'This student still has ongoing batches — withdraw them first.'}, status=400,
+            )
+        if student.batch_enrollments.filter(status='active').exists():
+            return Response(
+                {'detail': 'This student is still active in a batch — withdraw them first.'}, status=400,
             )
         student.status = 'archived'
         student.save(update_fields=['status'])
@@ -252,6 +287,11 @@ class StudentViewSet(ModelViewSet):
 
         data = StudentSerializer(student).data
         data['enrollments'] = EnrollmentHistoryWithPaymentSerializer(enrollments, many=True).data
+        batch_enrollments = (
+            student.batch_enrollments.select_related('batch__course').prefetch_related('installments')
+            .order_by('-joined_date')
+        )
+        data['batch_enrollments'] = StudentBatchEnrollmentSerializer(batch_enrollments, many=True).data
         return Response(data)
 
 
