@@ -7,6 +7,7 @@ from django.db.models.functions import Coalesce
 from rest_framework import filters, status
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
@@ -155,5 +156,7 @@ class TrainerCourseRateViewSet(ModelViewSet):
         qs = super().get_queryset()
         trainer_id = self.request.query_params.get('trainer')
         if trainer_id:
+            if not trainer_id.isdigit():
+                raise DRFValidationError({'trainer': 'Invalid trainer filter.'})
             qs = qs.filter(trainer_id=trainer_id)
         return qs

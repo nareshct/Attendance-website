@@ -1,5 +1,6 @@
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from audit.services import log_action
@@ -191,6 +192,22 @@ def trainer_payment_gate(enrollment):
             return 'blocked'
 
     return 'clear'
+
+
+def trainer_covers_enrollment(trainer, enrollment_id):
+    """Whether `trainer` currently has active substitute coverage (today falls in
+    [start_date, end_date] — see SubstituteAssignment) for the given enrollment.
+
+    Used everywhere a non-owning trainer's read access to an enrollment needs to match
+    what MyStudentsView already surfaces to them (a covered enrollment shows up in their
+    My Students list with a 'covering_for' label) — attendance history and report/
+    certificate downloads should be reachable for the same enrollments, not just the
+    ones they're permanently assigned to.
+    """
+    today = timezone.localdate()
+    return SubstituteAssignment.objects.filter(
+        enrollment_id=enrollment_id, substitute_trainer=trainer, start_date__lte=today, end_date__gte=today,
+    ).exists()
 
 
 def find_schedule_conflict(trainer, class_time, class_days, exclude_enrollment_id=None, date_range=None):

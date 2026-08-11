@@ -8,7 +8,7 @@ from billing.models import BillingCycle, ClientInvoiceAdjustment, PayoutAdjustme
 from billing.services import get_or_create_cycle
 from clients.models import Client
 from courses.models import Course
-from enrollments.models import Enrollment
+from enrollments.models import Enrollment, SubstituteAssignment
 from students.models import Student
 from trainers.models import Trainer
 
@@ -313,3 +313,53 @@ class DuplicatePendingAttendanceRequestTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         req.refresh_from_db()
         self.assertEqual(req.status, 'pending')
+
+
+class SubstituteTrainerHistoryAccessTests(APITestCase):
+    """get_queryset()'s ?enrollment= branch previously only matched
+    enrollment__trainer=user.trainer, ignoring an active SubstituteAssignment — a
+    trainer currently covering someone else's enrollment (and shown it in their own My
+    Students list) got a silently empty history instead of what they're actually
+    covering."""
+
+    def setUp(self):
+        self.owner = _make_trainer('sub_hist_owner', Decimal('100'))
+        self.substitute = _make_trainer('sub_hist_sub', Decimal('100'))
+        self.stranger = _make_trainer('sub_hist_stranger', Decimal('100'))
+        course = Course.objects.create(name='Sub History Course', total_classes=24, rate_per_class=Decimal('300'))
+        student = Student.objects.create(name='Covered Kid', grade='5', source_type='B2C')
+        self.enrollment = Enrollment.objects.create(
+            student=student, course=course, trainer=self.owner,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        Attendance.objects.create(
+            enrollment=self.enrollment, date=datetime.date(2026, 1, 5), status='present', marked_by=self.owner,
+        )
+        SubstituteAssignment.objects.create(
+            enrollment=self.enrollment, substitute_trainer=self.substitute,
+            start_date=datetime.date(2026, 1, 1), end_date=datetime.date(2026, 12, 31),
+        )
+        self.factory = APIRequestFactory()
+
+    def _list_for(self, user):
+        request = self.factory.get(f'/api/attendance/?enrollment={self.enrollment.id}')
+        force_authenticate(request, user=user)
+        return AttendanceViewSet.as_view({'get': 'list'})(request)
+
+    def test_active_substitute_can_see_full_history(self):
+        response = self._list_for(self.substitute.user)
+        self.assertEqual(response.status_code, 200)
+        results = response.data['results'] if isinstance(response.data, dict) else response.data
+        self.assertEqual(len(results), 1)
+
+    def test_unrelated_trainer_still_gets_nothing(self):
+        response = self._list_for(self.stranger.user)
+        self.assertEqual(response.status_code, 200)
+        results = response.data['results'] if isinstance(response.data, dict) else response.data
+        self.assertEqual(len(results), 0)
+
+    def test_owning_trainer_still_sees_history(self):
+        response = self._list_for(self.owner.user)
+        self.assertEqual(response.status_code, 200)
+        results = response.data['results'] if isinstance(response.data, dict) else response.data
+        self.assertEqual(len(results), 1)

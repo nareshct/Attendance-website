@@ -785,3 +785,51 @@ class MyStudentsLastClassDateTests(APITestCase):
         response = self._list(trainer)
 
         self.assertIsNone(response.data[0]['last_class_date'])
+
+
+class SubstituteTrainerReportCertificateAccessTests(APITestCase):
+    """report/certificate previously only checked enrollment.trainer_id, ignoring an
+    active SubstituteAssignment — a trainer covering someone else's enrollment (and
+    shown it in their own My Students list) always got a 403 trying to download either
+    PDF for that student."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        owner_user = get_user_model().objects.create_user(username='sub_pdf_owner', password='x')
+        self.owner = Trainer.objects.create(
+            user=owner_user, name='Owner', phone_number='0000000000', place='Here', default_rate_per_class=Decimal('100'),
+        )
+        sub_user = get_user_model().objects.create_user(username='sub_pdf_sub', password='x')
+        self.substitute = Trainer.objects.create(
+            user=sub_user, name='Substitute', phone_number='0000000000', place='Here', default_rate_per_class=Decimal('100'),
+        )
+        stranger_user = get_user_model().objects.create_user(username='sub_pdf_stranger', password='x')
+        self.stranger = Trainer.objects.create(
+            user=stranger_user, name='Stranger', phone_number='0000000000', place='Here', default_rate_per_class=Decimal('100'),
+        )
+        self.enrollment = _make_enrollment(self.owner)
+        SubstituteAssignment.objects.create(
+            enrollment=self.enrollment, substitute_trainer=self.substitute,
+            start_date=datetime.date(2026, 1, 1), end_date=datetime.date(2026, 12, 31),
+        )
+
+    def _get(self, action, user):
+        request = self.factory.get(f'/api/enrollments/{self.enrollment.id}/{action}/')
+        force_authenticate(request, user=user)
+        return EnrollmentViewSet.as_view({'get': action})(request, pk=self.enrollment.id)
+
+    def test_active_substitute_can_download_report(self):
+        response = self._get('report', self.substitute.user)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+
+    def test_unrelated_trainer_cannot_download_report(self):
+        response = self._get('report', self.stranger.user)
+        self.assertEqual(response.status_code, 403)
+
+    def test_active_substitute_can_download_certificate_once_completed(self):
+        self.enrollment.status = 'completed'
+        self.enrollment.save(update_fields=['status'])
+        response = self._get('certificate', self.substitute.user)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')

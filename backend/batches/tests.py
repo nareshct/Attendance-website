@@ -1253,3 +1253,83 @@ class BatchEnrollmentReportCertificateTests(APITestCase):
         response = self._get('certificate', self.admin)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
+
+
+class BatchSessionReassignmentBlockedTests(APITestCase):
+    """BatchSessionSerializer previously let 'batch' through unchanged on update — a
+    trainer logging a session on a batch they're assigned to could then PATCH it onto a
+    completely different batch they have no access to, fabricating that other batch's
+    session history."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.trainer = _make_trainer(username='reassign_trainer', name='Priya')
+        self.own_batch = _make_batch(trainer_names='Priya')
+        self.other_batch = _make_batch(trainer_names='Ravi')
+        self.session = BatchSession.objects.create(
+            batch=self.own_batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya', created_by=self.trainer.user,
+        )
+
+    def test_cannot_move_a_session_to_a_different_batch(self):
+        request = self.factory.patch(f'/api/batch-sessions/{self.session.id}/', {
+            'batch': self.other_batch.id,
+        }, format='json')
+        force_authenticate(request, user=self.trainer.user)
+        response = BatchSessionViewSet.as_view({'patch': 'partial_update'})(request, pk=self.session.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.batch_id, self.own_batch.id)
+
+    def test_can_still_edit_other_fields_without_touching_batch(self):
+        request = self.factory.patch(f'/api/batch-sessions/{self.session.id}/', {
+            'topic_covered': 'Loops and conditionals',
+        }, format='json')
+        force_authenticate(request, user=self.trainer.user)
+        response = BatchSessionViewSet.as_view({'patch': 'partial_update'})(request, pk=self.session.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.topic_covered, 'Loops and conditionals')
+        self.assertEqual(self.session.batch_id, self.own_batch.id)
+
+
+class BatchPayoutDeleteGuardTests(APITestCase):
+    """DELETE previously had no perform_destroy override at all — a paid payout (money
+    that's actually gone out) could be deleted with no audit trail, unlike mark_paid/
+    cancel which both log and both refuse to re-action an already-settled payout."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.admin = get_user_model().objects.create_user(username='payout_delete_admin', password='x', is_staff=True)
+        self.batch = _make_batch()
+        self.payout = BatchPayout.objects.create(batch=self.batch, recipient_name='Priya', amount=Decimal('1000'))
+
+    def test_can_delete_a_pending_payout(self):
+        request = self.factory.delete(f'/api/batch-payouts/{self.payout.id}/')
+        force_authenticate(request, user=self.admin)
+        response = BatchPayoutViewSet.as_view({'delete': 'destroy'})(request, pk=self.payout.id)
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(BatchPayout.objects.filter(id=self.payout.id).exists())
+
+    def test_cannot_delete_an_already_paid_payout(self):
+        self.payout.paid_status = 'paid'
+        self.payout.paid_date = datetime.date(2026, 7, 10)
+        self.payout.save(update_fields=['paid_status', 'paid_date'])
+
+        request = self.factory.delete(f'/api/batch-payouts/{self.payout.id}/')
+        force_authenticate(request, user=self.admin)
+        response = BatchPayoutViewSet.as_view({'delete': 'destroy'})(request, pk=self.payout.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(BatchPayout.objects.filter(id=self.payout.id).exists())
+
+    def test_deleting_a_pending_payout_writes_an_audit_log_entry(self):
+        from audit.models import AuditLog
+
+        request = self.factory.delete(f'/api/batch-payouts/{self.payout.id}/')
+        force_authenticate(request, user=self.admin)
+        BatchPayoutViewSet.as_view({'delete': 'destroy'})(request, pk=self.payout.id)
+
+        self.assertTrue(AuditLog.objects.filter(action='batch_payout_delete').exists())

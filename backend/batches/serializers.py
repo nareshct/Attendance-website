@@ -71,6 +71,15 @@ class BatchSessionSerializer(serializers.ModelSerializer):
         user = request.user
         return bool(user.is_staff or obj.created_by_id is None or obj.created_by_id == user.id)
 
+    def validate(self, data):
+        # 'batch' stays writable (required at creation, and the view already checks the
+        # creator is allowed on it) but can't be reassigned via a later PATCH — moving a
+        # session to a different batch, possibly one the editor isn't even assigned to,
+        # isn't a supported edit. Mirrors BatchEnrollmentSerializer.validate() above.
+        if self.instance and 'batch' in data and data['batch'] != self.instance.batch:
+            raise serializers.ValidationError({'batch': "Can't move this session to a different batch."})
+        return data
+
 
 class BatchSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)

@@ -1,4 +1,5 @@
 import csv
+from datetime import datetime
 
 from django.db.models import Max
 from django.http import HttpResponse
@@ -15,6 +16,30 @@ def csv_response(filename):
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+
+def bad_request(detail):
+    return HttpResponse(detail, status=400, content_type='text/plain')
+
+
+def valid_id(value):
+    """A query-param value destined for a `.filter(<field>_id=value)` lookup — must be
+    empty/absent or digits only, otherwise Django raises an unhandled ValueError when
+    the queryset is evaluated (these are plain APIViews, so DRF's exception handler
+    never sees it — it would 500 instead of a clean 400)."""
+    return value is None or value.isdigit()
+
+
+def valid_date(value):
+    """Same reasoning as valid_id() but for a `date__gte`/`date__lte` filter — an
+    unparseable string raises an unhandled ValidationError from the DB layer."""
+    if value is None:
+        return True
+    try:
+        datetime.strptime(value, '%Y-%m-%d')
+        return True
+    except ValueError:
+        return False
 
 
 # A cell starting with =, +, -, or @ is executed as a formula by Excel/Sheets/LibreOffice
@@ -39,6 +64,10 @@ class PayoutsReportView(APIView):
         qs = Payout.objects.select_related('trainer', 'cycle').order_by('-cycle__cycle_start', 'trainer__name')
         trainer_id = request.query_params.get('trainer')
         cycle_id = request.query_params.get('cycle')
+        if not valid_id(trainer_id):
+            return bad_request('Invalid trainer filter.')
+        if not valid_id(cycle_id):
+            return bad_request('Invalid cycle filter.')
         if trainer_id:
             qs = qs.filter(trainer_id=trainer_id)
         if cycle_id:
@@ -110,6 +139,10 @@ class ClientAttendanceReportView(APIView):
 
         start = request.query_params.get('start')
         end = request.query_params.get('end')
+        if not valid_date(start):
+            return bad_request('Invalid start date — use YYYY-MM-DD.')
+        if not valid_date(end):
+            return bad_request('Invalid end date — use YYYY-MM-DD.')
         if start:
             records = records.filter(date__gte=start)
         if end:
@@ -146,6 +179,12 @@ class AttendanceReportView(APIView):
         trainer_id = request.query_params.get('trainer')
         start = request.query_params.get('start')
         end = request.query_params.get('end')
+        if not valid_id(trainer_id):
+            return bad_request('Invalid trainer filter.')
+        if not valid_date(start):
+            return bad_request('Invalid start date — use YYYY-MM-DD.')
+        if not valid_date(end):
+            return bad_request('Invalid end date — use YYYY-MM-DD.')
         if trainer_id:
             records = records.filter(marked_by_id=trainer_id)
         if start:

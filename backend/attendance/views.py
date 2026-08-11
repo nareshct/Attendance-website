@@ -15,6 +15,7 @@ from billing.models import B2CRevenueAdjustment, BillingCycle, ClientInvoiceAdju
 from billing.services import get_or_create_cycle, historical_rate
 from config.permissions import IsAdmin, IsAdminOrTrainer, IsTrainer
 from enrollments.models import Enrollment
+from enrollments.services import trainer_covers_enrollment
 
 from .models import Attendance, AttendanceRequest
 from .serializers import AttendanceRequestSerializer, AttendanceSerializer
@@ -56,7 +57,15 @@ class AttendanceViewSet(ModelViewSet):
                 # Full session history for one of the trainer's own current
                 # enrollments — includes sessions taught before any transfer,
                 # so a newly-assigned trainer can see everything already covered.
-                qs = qs.filter(enrollment_id=enrollment_id, enrollment__trainer=user.trainer)
+                # Also open to a trainer currently covering this enrollment as an
+                # active substitute (see trainer_covers_enrollment) — MyStudentsView
+                # already surfaces these enrollments to them, so history access
+                # should match rather than silently coming back empty.
+                is_own = Enrollment.objects.filter(id=enrollment_id, trainer=user.trainer).exists()
+                if is_own or trainer_covers_enrollment(user.trainer, enrollment_id):
+                    qs = qs.filter(enrollment_id=enrollment_id)
+                else:
+                    qs = qs.none()
             else:
                 qs = qs.filter(marked_by=user.trainer)
         elif enrollment_id:

@@ -165,3 +165,16 @@ class CourseMaterialTrainerScopingTests(APITestCase):
         titles = [row['title'] for row in response.data['results']]
         self.assertIn('Mine', titles)
         self.assertIn('Not mine', titles)
+
+
+class CourseMaterialInvalidCourseFilterTests(APITestCase):
+    """?course= previously went straight into a queryset filter with no validation —
+    a non-numeric value raised an unhandled ValueError (500) instead of a clean 400."""
+
+    def test_non_numeric_course_filter_returns_400_not_a_500(self):
+        admin = get_user_model().objects.create_user(username='material_filter_admin', password='x', is_staff=True)
+        factory = APIRequestFactory()
+        request = factory.get('/api/course-materials/?course=not-a-number')
+        force_authenticate(request, user=admin)
+        response = CourseMaterialViewSet.as_view({'get': 'list'})(request)
+        self.assertEqual(response.status_code, 400)

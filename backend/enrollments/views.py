@@ -21,7 +21,7 @@ from .certificate_pdf import render_certificate_pdf
 from .models import Enrollment, PaymentInstallment, SubstituteAssignment
 from .report_pdf import render_student_report_pdf
 from .serializers import EnrollmentSerializer, PaymentInstallmentSerializer, SubstituteAssignmentSerializer
-from .services import find_schedule_conflict, trainer_payment_gate
+from .services import find_schedule_conflict, trainer_covers_enrollment, trainer_payment_gate
 
 
 class EnrollmentViewSet(ModelViewSet):
@@ -208,11 +208,21 @@ class EnrollmentViewSet(ModelViewSet):
             )
         return Response(SubstituteAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
 
+    def _check_trainer_can_access(self, request, enrollment):
+        # Own enrollment, or currently covering it as an active substitute (see
+        # trainer_covers_enrollment) — MyStudentsView already surfaces a covered
+        # enrollment to the substitute trainer, so report/certificate access should
+        # match rather than always 403ing for them.
+        if request.user.is_staff or enrollment.trainer_id == request.user.trainer.id:
+            return
+        if trainer_covers_enrollment(request.user.trainer, enrollment.id):
+            return
+        raise PermissionDenied('You can only download this for your own students.')
+
     @action(detail=True, methods=['get'])
     def report(self, request, pk=None):
         enrollment = self.get_object()
-        if not request.user.is_staff and enrollment.trainer_id != request.user.trainer.id:
-            raise PermissionDenied('You can only download reports for your own students.')
+        self._check_trainer_can_access(request, enrollment)
 
         pdf_bytes = render_student_report_pdf(enrollment)
         slug = re.sub(r'[^A-Za-z0-9]+', '-', enrollment.student.name).strip('-').lower()
@@ -225,8 +235,7 @@ class EnrollmentViewSet(ModelViewSet):
     @action(detail=True, methods=['get'])
     def certificate(self, request, pk=None):
         enrollment = self.get_object()
-        if not request.user.is_staff and enrollment.trainer_id != request.user.trainer.id:
-            raise PermissionDenied('You can only download certificates for your own students.')
+        self._check_trainer_can_access(request, enrollment)
         if enrollment.status != 'completed':
             return Response(
                 {'detail': 'A certificate is only available once this enrollment is completed.'},

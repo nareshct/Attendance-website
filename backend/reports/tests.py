@@ -13,7 +13,7 @@ from enrollments.models import Enrollment
 from students.models import Student
 from trainers.models import Trainer
 
-from .views import AttendanceReportView, ClientAttendanceReportView
+from .views import AttendanceReportView, ClientAttendanceReportView, PayoutsReportView
 
 
 class CsvFormulaInjectionEscapedTests(APITestCase):
@@ -78,3 +78,51 @@ class CsvFormulaInjectionEscapedTests(APITestCase):
         rows = self._rows(response)
         topics = [row[-1] for row in rows[1:]]
         self.assertIn('Loops and conditionals', topics)
+
+
+class InvalidFilterParamsReturn400Tests(APITestCase):
+    """trainer/cycle/start/end query params previously went straight into a queryset
+    filter with no validation — a malformed value raised an unhandled ValueError/
+    ValidationError (500) instead of a clean 400, since these are plain APIViews and
+    DRF's exception handler never sees a built-in exception like that."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_bad_filters', password='x', is_staff=True)
+        self.client_obj = Client.objects.create(company_name='Bad Filter Client', contact_phone='123', rate_per_class=Decimal('200'))
+        self.factory = APIRequestFactory()
+
+    def test_payouts_report_rejects_a_non_numeric_trainer_id(self):
+        request = self.factory.get('/api/reports/payouts/?trainer=not-a-number')
+        force_authenticate(request, user=self.admin)
+        response = PayoutsReportView.as_view()(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_payouts_report_rejects_a_non_numeric_cycle_id(self):
+        request = self.factory.get('/api/reports/payouts/?cycle=not-a-number')
+        force_authenticate(request, user=self.admin)
+        response = PayoutsReportView.as_view()(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_attendance_report_rejects_a_non_numeric_trainer_id(self):
+        request = self.factory.get('/api/reports/attendance/?trainer=not-a-number')
+        force_authenticate(request, user=self.admin)
+        response = AttendanceReportView.as_view()(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_attendance_report_rejects_a_malformed_start_date(self):
+        request = self.factory.get('/api/reports/attendance/?start=not-a-date')
+        force_authenticate(request, user=self.admin)
+        response = AttendanceReportView.as_view()(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_client_attendance_report_rejects_a_malformed_end_date(self):
+        request = self.factory.get(f'/api/reports/client/{self.client_obj.id}/attendance/?end=not-a-date')
+        force_authenticate(request, user=self.admin)
+        response = ClientAttendanceReportView.as_view()(request, client_id=self.client_obj.id)
+        self.assertEqual(response.status_code, 400)
+
+    def test_attendance_report_still_works_with_valid_params(self):
+        request = self.factory.get('/api/reports/attendance/?start=2026-01-01&end=2026-01-31')
+        force_authenticate(request, user=self.admin)
+        response = AttendanceReportView.as_view()(request)
+        self.assertEqual(response.status_code, 200)

@@ -16,7 +16,7 @@ from enrollments.models import Enrollment, SubstituteAssignment
 from students.models import Student
 
 from .models import Trainer
-from .views import TrainerViewSet
+from .views import TrainerCourseRateViewSet, TrainerViewSet
 
 
 class TrainerSearchTests(APITestCase):
@@ -527,3 +527,16 @@ class TrainerArchiveBlockersTests(APITestCase):
         force_authenticate(request, user=self.trainer.user)
         response = TrainerViewSet.as_view({'get': 'archive_blockers'})(request, pk=self.trainer.id)
         self.assertEqual(response.status_code, 403)
+
+
+class TrainerCourseRateInvalidFilterTests(APITestCase):
+    """?trainer= previously went straight into a queryset filter with no validation —
+    a non-numeric value raised an unhandled ValueError (500) instead of a clean 400."""
+
+    def test_non_numeric_trainer_filter_returns_400_not_a_500(self):
+        admin = get_user_model().objects.create_user(username='rate_filter_admin', password='x', is_staff=True)
+        factory = APIRequestFactory()
+        request = factory.get('/api/trainer-course-rates/?trainer=not-a-number')
+        force_authenticate(request, user=admin)
+        response = TrainerCourseRateViewSet.as_view({'get': 'list'})(request)
+        self.assertEqual(response.status_code, 400)

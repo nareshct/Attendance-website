@@ -194,6 +194,23 @@ class BatchPayoutViewSet(ModelViewSet):
         )
         return Response(BatchPayoutSerializer(payout).data)
 
+    def destroy(self, request, *args, **kwargs):
+        # A 'paid' payout is money that's actually gone out — deleting it (rather than
+        # 'cancel', which is for a pending one that's off) would erase that history with
+        # no trace. Mirrors mark_paid/cancel's own already-actioned guard above.
+        payout = self.get_object()
+        if payout.paid_status != 'pending':
+            return Response(
+                {'detail': f'Payout is already {payout.paid_status} — it can no longer be deleted.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        log_action(
+            request.user, 'batch_payout_delete',
+            f'{payout.batch.name} — {payout.recipient_name}', f'₹{payout.amount}',
+        )
+        payout.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class BatchEnrollmentViewSet(ModelViewSet):
     queryset = BatchEnrollment.objects.select_related(

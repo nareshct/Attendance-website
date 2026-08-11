@@ -1,6 +1,7 @@
 from django.http import FileResponse
 from rest_framework import filters
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.viewsets import ModelViewSet
 
@@ -52,6 +53,8 @@ class CourseMaterialViewSet(ModelViewSet):
         qs = CourseMaterial.objects.select_related('course').order_by('course__name', '-uploaded_at')
         course_id = self.request.query_params.get('course')
         if course_id:
+            if not course_id.isdigit():
+                raise ValidationError({'course': 'Invalid course filter.'})
             qs = qs.filter(course_id=course_id)
 
         # Unlike CourseViewSet (course *names* aren't sensitive, so that stays
