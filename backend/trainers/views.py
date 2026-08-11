@@ -59,6 +59,27 @@ class TrainerViewSet(ModelViewSet):
             qs = qs.filter(status=status_param)
         return qs
 
+    def perform_create(self, serializer):
+        trainer = serializer.save()
+        log_action(
+            self.request.user, 'trainer_create', trainer.name,
+            f'{trainer.trainer_id} — default rate ₹{trainer.default_rate_per_class}/class',
+        )
+
+    def perform_update(self, serializer):
+        old_name = serializer.instance.name
+        old_rate = serializer.instance.default_rate_per_class
+        trainer = serializer.save()
+        detail_parts = []
+        if old_name != trainer.name:
+            detail_parts.append(f'name {old_name} → {trainer.name}')
+        if old_rate != trainer.default_rate_per_class:
+            # See TrainerCourseRateViewSet's create/update for the per-course override
+            # equivalent — this covers the flat default_rate_per_class only.
+            detail_parts.append(f'default rate ₹{old_rate} → ₹{trainer.default_rate_per_class}')
+        if detail_parts:
+            log_action(self.request.user, 'trainer_edit', trainer.name, '; '.join(detail_parts))
+
     @action(detail=True, methods=['get'], url_path='archive-blockers')
     def archive_blockers(self, request, pk=None):
         """Everything still tying this trainer to active/unresolved work — the
@@ -160,3 +181,26 @@ class TrainerCourseRateViewSet(ModelViewSet):
                 raise DRFValidationError({'trainer': 'Invalid trainer filter.'})
             qs = qs.filter(trainer_id=trainer_id)
         return qs
+
+    def perform_create(self, serializer):
+        rate = serializer.save()
+        log_action(
+            self.request.user, 'trainer_course_rate_create',
+            f'{rate.trainer.name} — {rate.course.name}', f'₹{rate.rate_per_class}/class',
+        )
+
+    def perform_update(self, serializer):
+        old_rate = serializer.instance.rate_per_class
+        rate = serializer.save()
+        if old_rate != rate.rate_per_class:
+            log_action(
+                self.request.user, 'trainer_course_rate_edit',
+                f'{rate.trainer.name} — {rate.course.name}', f'₹{old_rate} → ₹{rate.rate_per_class}',
+            )
+
+    def perform_destroy(self, instance):
+        log_action(
+            self.request.user, 'trainer_course_rate_delete',
+            f'{instance.trainer.name} — {instance.course.name}', f'₹{instance.rate_per_class}/class',
+        )
+        instance.delete()

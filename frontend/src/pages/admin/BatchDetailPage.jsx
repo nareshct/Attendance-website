@@ -603,6 +603,9 @@ export default function BatchDetailPage() {
   if (error && !batch) return <p className="text-error text-sm">{error}</p>
   if (!batch) return <p className="text-text-tertiary text-sm">Loading…</p>
 
+  const batchLocked = batch.status === 'completed' || batch.status === 'cancelled'
+  const batchLockedReason = `This batch is ${batch.status} — it can no longer be changed.`
+
   return (
     <div>
       <Link to="/admin/batches" className="text-sm font-medium text-primary hover:underline focus-ring">&larr; Back to batches</Link>
@@ -670,7 +673,16 @@ export default function BatchDetailPage() {
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
-            <input required type="number" min="1" placeholder="Total classes" value={batchForm.total_classes} onChange={(e) => setBatchForm({ ...batchForm, total_classes: e.target.value })} className="input" />
+            <input
+              required
+              type="number"
+              min="1"
+              placeholder="Total classes"
+              value={batchForm.total_classes}
+              onChange={(e) => setBatchForm({ ...batchForm, total_classes: e.target.value })}
+              disabled={batch.enrolled_count > 0}
+              className="input"
+            />
             <input
               required
               type="number"
@@ -692,8 +704,8 @@ export default function BatchDetailPage() {
             </select>
             {batch.enrolled_count > 0 && (
               <p className="sm:col-span-2 text-xs text-text-tertiary -mt-2">
-                Fee and payment plan are locked — {batch.enrolled_count} student(s) already enrolled, and their
-                existing installments won't be recalculated.
+                Total classes, fee, and payment plan are locked — {batch.enrolled_count} student(s) already enrolled,
+                and their existing installments won't be recalculated.
               </p>
             )}
             <input required type="date" value={batchForm.start_date} onChange={(e) => setBatchForm({ ...batchForm, start_date: e.target.value })} className="input" />
@@ -867,7 +879,9 @@ export default function BatchDetailPage() {
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-navy">Sessions</h2>
-        <Button onClick={() => setShowAddSession(true)}>+ Log session</Button>
+        <Button disabled={batchLocked} title={batchLocked ? batchLockedReason : undefined} onClick={() => setShowAddSession(true)}>
+          + Log session
+        </Button>
       </div>
 
       <Modal open={showAddSession} onClose={() => setShowAddSession(false)} title="Log a session">
@@ -929,13 +943,19 @@ export default function BatchDetailPage() {
                   ) : '—'}
                 </td>
                 <td className="table-cell text-right whitespace-nowrap">
-                  <button onClick={() => openEditSession(s)} className="text-xs font-medium text-primary hover:underline focus-ring">
-                    Edit
-                  </button>
-                  {' · '}
-                  <button onClick={() => setDeleteSessionTarget(s)} className="text-xs font-medium text-error hover:underline focus-ring">
-                    Delete
-                  </button>
+                  {batchLocked ? (
+                    <span className="text-xs text-text-tertiary" title={batchLockedReason}>Locked</span>
+                  ) : (
+                    <>
+                      <button onClick={() => openEditSession(s)} className="text-xs font-medium text-primary hover:underline focus-ring">
+                        Edit
+                      </button>
+                      {' · '}
+                      <button onClick={() => setDeleteSessionTarget(s)} className="text-xs font-medium text-error hover:underline focus-ring">
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
@@ -954,16 +974,16 @@ export default function BatchDetailPage() {
           </Button>
           <Button
             variant="secondary"
-            disabled={!batch.accepting_enrollments}
+            disabled={batchLocked || !batch.accepting_enrollments}
             onClick={() => setShowImport(true)}
-            title={!batch.accepting_enrollments ? 'This batch is closed to new enrollments' : undefined}
+            title={batchLocked ? batchLockedReason : !batch.accepting_enrollments ? 'This batch is closed to new enrollments' : undefined}
           >
             Import from Excel
           </Button>
           <Button
-            disabled={!batch.accepting_enrollments}
+            disabled={batchLocked || !batch.accepting_enrollments}
             onClick={() => setShowAddStudent(true)}
-            title={!batch.accepting_enrollments ? 'This batch is closed to new enrollments' : undefined}
+            title={batchLocked ? batchLockedReason : !batch.accepting_enrollments ? 'This batch is closed to new enrollments' : undefined}
           >
             + Add student
           </Button>

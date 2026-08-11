@@ -7,7 +7,7 @@ from django.http import HttpResponse
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.generics import ListAPIView
-from rest_framework.exceptions import MethodNotAllowed, PermissionDenied
+from rest_framework.exceptions import MethodNotAllowed, PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
@@ -37,6 +37,17 @@ from .services import (
     import_students_from_excel,
     source_report,
 )
+
+# A batch's status (see Batch.STATUS_CHOICES) is more than a label once it's
+# completed/cancelled — the batch lifecycle stops being editable at that point. Shared
+# by every place that needs to lock a batch: new enrollments, imports, and session
+# logging all check this, not just the separate accepting_enrollments flag (which only
+# ever controls new sign-ups on an otherwise-still-open batch).
+LOCKED_BATCH_STATUSES = ('completed', 'cancelled')
+
+
+def batch_locked_detail(batch):
+    return f'This batch is {batch.get_status_display().lower()} — it can no longer be changed.'
 
 
 class BatchViewSet(ModelViewSet):
@@ -222,26 +233,14 @@ class BatchEnrollmentViewSet(ModelViewSet):
     filter_backends = [filters.SearchFilter]
     search_fields = ['student__name']
 
-    def get_permissions(self):
-        # Everything else on this viewset (create/edit/withdraw/remove a batch
-        # enrollment) stays admin-only — only the read-only PDF downloads open
-        # up to a trainer running the batch, mirroring EnrollmentViewSet.report/
-        # .certificate's admin-or-owning-trainer split.
-        if self.action in ('report', 'certificate'):
-            return [IsAdminOrTrainer()]
-        return [IsAdmin()]
-
-    def _check_trainer_owns_batch(self, request, batch_enrollment):
-        if request.user.is_staff:
-            return
-        allowed_ids = batch_ids_for_trainer(request.user.trainer.name)
-        if batch_enrollment.batch_id not in allowed_ids:
-            raise PermissionDenied("You're not listed as a trainer on this batch.")
+    # Admin-only end to end — including report/certificate. A trainer running the batch
+    # has no equivalent access point on the frontend (unlike EnrollmentViewSet.report/
+    # .certificate, which is reachable from the trainer's My Students page), so granting
+    # it here was a backend-only capability with no matching UI.
 
     @action(detail=True, methods=['get'])
     def report(self, request, pk=None):
         batch_enrollment = self.get_object()
-        self._check_trainer_owns_batch(request, batch_enrollment)
 
         pdf_bytes = render_batch_student_report_pdf(batch_enrollment)
         slug = re.sub(r'[^A-Za-z0-9]+', '-', batch_enrollment.student.name).strip('-').lower()
@@ -254,7 +253,6 @@ class BatchEnrollmentViewSet(ModelViewSet):
     @action(detail=True, methods=['get'])
     def certificate(self, request, pk=None):
         batch_enrollment = self.get_object()
-        self._check_trainer_owns_batch(request, batch_enrollment)
         # Batches have no per-student 'completed' state (see BatchEnrollment.
         # STATUS_CHOICES) — a certificate only makes sense once the whole
         # batch has finished, and only for a student who's still actively
@@ -308,6 +306,8 @@ class BatchEnrollmentViewSet(ModelViewSet):
         batch = Batch.objects.filter(id=batch_id).first()
         if batch is None:
             return Response({'detail': 'Select a batch.'}, status=status.HTTP_400_BAD_REQUEST)
+        if batch.status in LOCKED_BATCH_STATUSES:
+            return Response({'detail': batch_locked_detail(batch)}, status=status.HTTP_400_BAD_REQUEST)
         if not batch.accepting_enrollments:
             return Response({'detail': 'This batch is closed to new enrollments.'}, status=status.HTTP_400_BAD_REQUEST)
         if not student_id and not name:
@@ -359,6 +359,10 @@ class BatchEnrollmentViewSet(ModelViewSet):
     @action(detail=True, methods=['post'])
     def withdraw(self, request, pk=None):
         enrollment = self.get_object()
+        if enrollment.status != 'active':
+            return Response(
+                {'detail': 'Only an active batch enrollment can be withdrawn.'}, status=status.HTTP_400_BAD_REQUEST,
+            )
 
         refund_amount = Decimal('0')
         raw_refund = request.data.get('refund_amount')
@@ -386,6 +390,10 @@ class BatchEnrollmentViewSet(ModelViewSet):
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
         enrollment = self.get_object()
+        if enrollment.status != 'withdrawn':
+            return Response(
+                {'detail': 'Only a withdrawn batch enrollment can be reactivated.'}, status=status.HTTP_400_BAD_REQUEST,
+            )
         enrollment.status = 'active'
         enrollment.save(update_fields=['status'])
         enrollment.installments.filter(paid_status='cancelled').update(paid_status='pending')
@@ -467,10 +475,17 @@ class BatchSessionViewSet(ModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
+        batch_id = str(request.data.get('batch') or '')
+        if not batch_id.isdigit():
+            return Response({'detail': 'Select a batch.'}, status=status.HTTP_400_BAD_REQUEST)
+        batch = Batch.objects.filter(id=batch_id).first()
+        if batch is None:
+            return Response({'detail': 'Select a batch.'}, status=status.HTTP_400_BAD_REQUEST)
+        if batch.status in LOCKED_BATCH_STATUSES:
+            return Response({'detail': batch_locked_detail(batch)}, status=status.HTTP_400_BAD_REQUEST)
         if not request.user.is_staff:
-            batch_id = str(request.data.get('batch') or '')
             allowed_ids = batch_ids_for_trainer(request.user.trainer.name)
-            if not batch_id.isdigit() or int(batch_id) not in allowed_ids:
+            if batch.id not in allowed_ids:
                 return Response(
                     {'detail': "You're not listed as a trainer on this batch."}, status=status.HTTP_403_FORBIDDEN,
                 )
@@ -491,10 +506,14 @@ class BatchSessionViewSet(ModelViewSet):
 
     def perform_update(self, serializer):
         self._check_editable_by(serializer.instance)
+        if serializer.instance.batch.status in LOCKED_BATCH_STATUSES:
+            raise ValidationError(batch_locked_detail(serializer.instance.batch))
         session = serializer.save()
         log_action(self.request.user, 'batch_session_edit', f'{session.batch.name} — {session.date}', '')
 
     def perform_destroy(self, instance):
         self._check_editable_by(instance)
+        if instance.batch.status in LOCKED_BATCH_STATUSES:
+            raise ValidationError(batch_locked_detail(instance.batch))
         log_action(self.request.user, 'batch_session_delete', f'{instance.batch.name} — {instance.date}', '')
         instance.delete()

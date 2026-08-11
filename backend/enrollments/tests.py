@@ -437,6 +437,40 @@ class PaymentPlanRecalculationTests(APITestCase):
         self.assertEqual(second.amount, Decimal('10000.00'))
 
 
+class RateCorrectionEditTests(APITestCase):
+    """trainer_rate_per_class/client_rate_per_class are writable on update (not in
+    EnrollmentSerializer.read_only_fields) — locks in the backend behavior the admin
+    "rate correction" fields in EnrollmentsPage.jsx's edit-schedule modal depend on."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_rate_correction', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='trainer_rate_correction')
+        self.factory = APIRequestFactory()
+
+    def _patch(self, enrollment, **body):
+        request = self.factory.patch(f'/api/enrollments/{enrollment.id}/', body, format='json')
+        force_authenticate(request, user=self.admin)
+        return EnrollmentViewSet.as_view({'patch': 'partial_update'})(request, pk=enrollment.id)
+
+    def test_can_correct_a_mistyped_trainer_rate(self):
+        enrollment = _make_enrollment(self.trainer)
+        response = self._patch(enrollment, trainer_rate_per_class='150.00')
+        self.assertEqual(response.status_code, 200, response.data)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.trainer_rate_per_class, Decimal('150.00'))
+
+    def test_can_correct_a_mistyped_client_rate_for_a_b2b_student(self):
+        client_obj = Client.objects.create(company_name='Rate Correction Co', contact_phone='123', rate_per_class=Decimal('200'))
+        enrollment = _make_enrollment(self.trainer, source_type='B2B')
+        enrollment.student.client = client_obj
+        enrollment.student.save(update_fields=['client'])
+
+        response = self._patch(enrollment, client_rate_per_class='225.00')
+        self.assertEqual(response.status_code, 200, response.data)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.client_rate_per_class, Decimal('225.00'))
+
+
 class EnrollmentStatusSyncOnClassesTotalChangeTests(APITestCase):
     """Extending a completed enrollment's batch count must reopen it (status back to
     'ongoing') so the trainer can mark the newly added classes — see

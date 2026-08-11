@@ -15,6 +15,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from audit.services import log_action
+
 from .permissions import IsAdmin
 from .throttling import LoginRateThrottle, PasswordResetRateThrottle
 
@@ -33,6 +35,7 @@ class LoginView(APIView):
 
         token, _ = Token.objects.get_or_create(user=user)
         is_trainer = hasattr(user, 'trainer')
+        log_action(user, 'login', user.trainer.name if is_trainer else user.username, 'trainer' if is_trainer else 'admin')
         return Response({
             'token': token.key,
             'user_id': user.id,
@@ -81,6 +84,8 @@ class ChangePasswordView(APIView):
         # copy of the old token (a stale/leaked session) stops working right away.
         Token.objects.filter(user=request.user).delete()
         token = Token.objects.create(user=request.user)
+        is_trainer = hasattr(request.user, 'trainer')
+        log_action(request.user, 'password_change', request.user.trainer.name if is_trainer else request.user.username)
         return Response({'token': token.key})
 
 
@@ -210,6 +215,8 @@ class PasswordResetConfirmView(APIView):
         # emailed-link flow, not a logged-in change), so unlike ChangePasswordView there's
         # no "current request's own token" to preserve — they'll get a fresh one on login.
         Token.objects.filter(user=user).delete()
+        is_trainer = hasattr(user, 'trainer')
+        log_action(user, 'password_reset', user.trainer.name if is_trainer else user.username)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

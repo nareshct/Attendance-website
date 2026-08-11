@@ -69,6 +69,37 @@ class CourseTrainerAccessTests(APITestCase):
         self.assertEqual(response.status_code, 403)
 
 
+class CourseRateChangeAuditLogTests(APITestCase):
+    """Course.rate_per_class edits are money-affecting (feed every B2C billing
+    calculation) — see log_rate_change()'s RateHistory trail, which has no actor field.
+    CourseViewSet.perform_update fills that gap with a real audit log entry."""
+
+    def setUp(self):
+        from audit.models import AuditLog
+
+        self.AuditLog = AuditLog
+        self.admin = get_user_model().objects.create_user(username='course_rate_audit_admin', password='x', is_staff=True)
+        self.course = Course.objects.create(name='Rate Audit Course', total_classes=24, rate_per_class=Decimal('500'))
+        self.factory = APIRequestFactory()
+
+    def test_changing_the_rate_writes_an_audit_log_entry(self):
+        request = self.factory.patch(f'/api/courses/{self.course.id}/', {'rate_per_class': '750.00'}, format='json')
+        force_authenticate(request, user=self.admin)
+        response = CourseViewSet.as_view({'patch': 'partial_update'})(request, pk=self.course.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        entry = self.AuditLog.objects.get(action='course_rate_change', object_repr='Rate Audit Course')
+        self.assertIn('500', entry.detail)
+        self.assertIn('750', entry.detail)
+        self.assertEqual(entry.actor_id, self.admin.id)
+
+    def test_editing_without_changing_the_rate_writes_nothing(self):
+        request = self.factory.patch(f'/api/courses/{self.course.id}/', {'name': 'Renamed Course'}, format='json')
+        force_authenticate(request, user=self.admin)
+        response = CourseViewSet.as_view({'patch': 'partial_update'})(request, pk=self.course.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(self.AuditLog.objects.filter(action='course_rate_change').exists())
+
+
 class CourseRateValidationTests(APITestCase):
     def test_negative_rate_per_class_is_rejected(self):
         serializer = CourseSerializer(data={'name': 'Bad Course', 'total_classes': 24, 'rate_per_class': '-500.00'})

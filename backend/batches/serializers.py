@@ -101,10 +101,12 @@ class BatchSerializer(serializers.ModelSerializer):
     def validate(self, data):
         # Existing enrollments' installments are only ever built once, at signup time
         # (see services.create_batch_installments) — they're never recalculated, so
-        # changing the fee or payment plan after people have already enrolled would
-        # silently leave their installments mismatched with the batch's new numbers.
+        # changing the fee, payment plan, or total_classes (installment due_at_sessions
+        # milestones are resolved from it at creation time — see create_batch_installments)
+        # after people have already enrolled would silently leave their installments
+        # mismatched with the batch's new numbers.
         if self.instance and self.instance.batch_enrollments.exists():
-            locked_fields = ['fee_per_student', 'payment_type']
+            locked_fields = ['fee_per_student', 'payment_type', 'total_classes']
             changed = [f for f in locked_fields if f in data and data[f] != getattr(self.instance, f)]
             if changed:
                 raise serializers.ValidationError(

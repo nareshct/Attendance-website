@@ -6,6 +6,7 @@ from rest_framework.test import APIRequestFactory, APITestCase, force_authentica
 
 from audit.models import AuditLog
 from batches.models import Batch, BatchEnrollment
+from clients.models import Client
 from courses.models import Course
 from enrollments.models import Enrollment, PaymentInstallment, PaymentPlan
 from trainers.models import Trainer
@@ -219,6 +220,78 @@ class StudentArchiveHardBlockTests(APITestCase):
         actions = list(AuditLog.objects.values_list('action', flat=True))
         self.assertIn('student_archive', actions)
         self.assertIn('student_unarchive', actions)
+
+
+class StudentSourceTypeClientChangeGuardTests(APITestCase):
+    """billing/services.py reads student.source_type live, not a per-enrollment
+    snapshot — changing source_type or client while an enrollment is actively being
+    billed would silently change how it bills without reconciling the existing
+    PaymentPlan/client rate. Same hard-block condition as StudentViewSet.archive()."""
+
+    def _patch(self, student, admin, **body):
+        factory = APIRequestFactory()
+        request = factory.patch(f'/api/students/{student.id}/', body, format='json')
+        force_authenticate(request, user=admin)
+        return StudentViewSet.as_view({'patch': 'partial_update'})(request, pk=student.id)
+
+    def test_cannot_change_source_type_with_an_ongoing_enrollment(self):
+        admin = get_user_model().objects.create_user(username='admin_source_type_guard', password='x', is_staff=True)
+        trainer_user = get_user_model().objects.create_user(username='trainer_source_type_guard', password='x')
+        trainer = Trainer.objects.create(user=trainer_user, name='Guard Trainer', phone_number='1', place='X', default_rate_per_class=Decimal('100'))
+        course = Course.objects.create(name='Guard Course', total_classes=10)
+        student = Student.objects.create(name='Guarded B2C', grade='5', source_type='B2C')
+        Enrollment.objects.create(student=student, course=course, trainer=trainer, start_date=timezone.localdate(), status='ongoing')
+
+        client_obj = Client.objects.create(company_name='Guard Co', contact_phone='123', rate_per_class=Decimal('200'))
+        response = self._patch(student, admin, source_type='B2B', client=client_obj.id)
+
+        self.assertEqual(response.status_code, 400)
+        student.refresh_from_db()
+        self.assertEqual(student.source_type, 'B2C')
+
+    def test_cannot_change_client_with_an_active_batch_enrollment(self):
+        admin = get_user_model().objects.create_user(username='admin_client_change_guard', password='x', is_staff=True)
+        course = Course.objects.create(name='Guard Batch Course', total_classes=10)
+        batch = Batch.objects.create(
+            name='Guard Batch', course=course, total_classes=10, fee_per_student=Decimal('1000'),
+            start_date=timezone.localdate(),
+        )
+        original_client = Client.objects.create(company_name='Original Co', contact_phone='123', rate_per_class=Decimal('200'))
+        student = Student.objects.create(name='Guarded B2B', grade='5', source_type='B2B', client=original_client)
+        BatchEnrollment.objects.create(batch=batch, student=student, status='active', joined_date=timezone.localdate())
+
+        new_client = Client.objects.create(company_name='New Co', contact_phone='456', rate_per_class=Decimal('250'))
+        response = self._patch(student, admin, client=new_client.id)
+
+        self.assertEqual(response.status_code, 400)
+        student.refresh_from_db()
+        self.assertEqual(student.client_id, original_client.id)
+
+    def test_can_change_source_type_once_nothing_is_active(self):
+        admin = get_user_model().objects.create_user(username='admin_source_type_ok', password='x', is_staff=True)
+        student = Student.objects.create(name='Free To Change', grade='5', source_type='B2C')
+
+        client_obj = Client.objects.create(company_name='Free Co', contact_phone='123', rate_per_class=Decimal('200'))
+        response = self._patch(student, admin, source_type='B2B', client=client_obj.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        student.refresh_from_db()
+        self.assertEqual(student.source_type, 'B2B')
+        self.assertEqual(student.client_id, client_obj.id)
+
+    def test_unrelated_field_edit_is_unaffected_by_the_guard(self):
+        admin = get_user_model().objects.create_user(username='admin_unrelated_edit', password='x', is_staff=True)
+        trainer_user = get_user_model().objects.create_user(username='trainer_unrelated_edit', password='x')
+        trainer = Trainer.objects.create(user=trainer_user, name='Unrelated Trainer', phone_number='1', place='X', default_rate_per_class=Decimal('100'))
+        course = Course.objects.create(name='Unrelated Course', total_classes=10)
+        student = Student.objects.create(name='Old Name', grade='5', source_type='B2C')
+        Enrollment.objects.create(student=student, course=course, trainer=trainer, start_date=timezone.localdate(), status='ongoing')
+
+        response = self._patch(student, admin, name='New Name')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        student.refresh_from_db()
+        self.assertEqual(student.name, 'New Name')
 
 
 class StudentProfileHiddenFromTrainerWhenArchivedTests(APITestCase):

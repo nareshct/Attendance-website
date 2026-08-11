@@ -362,6 +362,8 @@ export default function EnrollmentsPage() {
   const [editClassTime, setEditClassTime] = useState('')
   const [editClassDays, setEditClassDays] = useState([])
   const [editClassesTotal, setEditClassesTotal] = useState('')
+  const [editTrainerRate, setEditTrainerRate] = useState('')
+  const [editClientRate, setEditClientRate] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 
@@ -374,6 +376,8 @@ export default function EnrollmentsPage() {
     setEditClassTime((enrollment.class_time || '').slice(0, 5))
     setEditClassDays((enrollment.class_days || '').split(',').filter(Boolean))
     setEditClassesTotal(String(enrollment.classes_total))
+    setEditTrainerRate(enrollment.trainer_rate_per_class != null ? String(enrollment.trainer_rate_per_class) : '')
+    setEditClientRate(enrollment.client_rate_per_class != null ? String(enrollment.client_rate_per_class) : '')
     setEditError('')
   }
 
@@ -383,6 +387,8 @@ export default function EnrollmentsPage() {
     setEditClassTime('')
     setEditClassDays([])
     setEditClassesTotal('')
+    setEditTrainerRate('')
+    setEditClientRate('')
     setEditError('')
   }
 
@@ -405,6 +411,8 @@ export default function EnrollmentsPage() {
           class_time: editClassTime,
           class_days: editClassDays.join(','),
           classes_total: Number(editClassesTotal),
+          ...(editTrainerRate !== '' ? { trainer_rate_per_class: editTrainerRate } : {}),
+          ...(editingEnrollment?.student_source_type === 'B2B' && editClientRate !== '' ? { client_rate_per_class: editClientRate } : {}),
         },
       })
       closeEditSchedule()
@@ -716,6 +724,34 @@ export default function EnrollmentsPage() {
                   {d.label}
                 </Button>
               ))}
+            </div>
+          </div>
+          <div className="pt-2 border-t border-gray-100">
+            <p className="text-xs text-text-secondary mb-2">
+              Rate correction — for fixing a mistyped rate. Only affects still-open billing cycles; already-closed
+              cycles' payouts/invoices are frozen and won't be recalculated.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-text-secondary mb-1">Trainer rate (₹/class)</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={editTrainerRate}
+                  onChange={(ev) => setEditTrainerRate(ev.target.value)}
+                  className="input"
+                />
+              </div>
+              {editingEnrollment?.student_source_type === 'B2B' && (
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">Client rate (₹/class)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={editClientRate}
+                    onChange={(ev) => setEditClientRate(ev.target.value)}
+                    className="input"
+                  />
+                </div>
+              )}
             </div>
           </div>
           {editError && <p className="text-error text-xs">{editError}</p>}

@@ -10,6 +10,7 @@ from django.utils.http import urlsafe_base64_encode
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from audit.models import AuditLog
 from trainers.models import Trainer
 
 from .views import (
@@ -46,6 +47,45 @@ class LoginThrottleTests(TestCase):
 
         self.assertEqual(statuses[:5], [401] * 5, 'the configured rate (5/min) should allow exactly 5 attempts through')
         self.assertEqual(statuses[5], 429, 'the 6th attempt within the window must be throttled')
+
+
+class LoginViewTests(TestCase):
+    """Activity Log frames itself as "who did what, when" — a login previously left
+    no trace there at all."""
+
+    def setUp(self):
+        cache.clear()
+        self.factory = APIRequestFactory()
+
+    def test_successful_login_returns_token_and_role(self):
+        get_user_model().objects.create_user(username='login_admin', password='CorrectPass123!', is_staff=True)
+        request = self.factory.post('/api/auth/login/', {'username': 'login_admin', 'password': 'CorrectPass123!'}, format='json')
+        response = LoginView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['role'], 'admin')
+        self.assertTrue(response.data['token'])
+
+    def test_successful_login_writes_an_audit_log_entry(self):
+        user = get_user_model().objects.create_user(username='login_audit_admin', password='CorrectPass123!', is_staff=True)
+        request = self.factory.post('/api/auth/login/', {'username': 'login_audit_admin', 'password': 'CorrectPass123!'}, format='json')
+        LoginView.as_view()(request)
+        entry = AuditLog.objects.get(action='login', object_repr='login_audit_admin')
+        self.assertEqual(entry.actor_id, user.id)
+
+    def test_failed_login_does_not_write_an_audit_log_entry(self):
+        get_user_model().objects.create_user(username='login_fail_admin', password='CorrectPass123!')
+        request = self.factory.post('/api/auth/login/', {'username': 'login_fail_admin', 'password': 'WrongPass'}, format='json')
+        response = LoginView.as_view()(request)
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(AuditLog.objects.filter(action='login', object_repr='login_fail_admin').exists())
+
+    def test_trainer_login_logs_the_trainer_name_not_the_username(self):
+        user = get_user_model().objects.create_user(username='login_trainer_user', password='CorrectPass123!')
+        Trainer.objects.create(user=user, name='Login Trainer', phone_number='0000000000', place='Here', default_rate_per_class=100)
+        request = self.factory.post('/api/auth/login/', {'username': 'login_trainer_user', 'password': 'CorrectPass123!'}, format='json')
+        LoginView.as_view()(request)
+        entry = AuditLog.objects.get(action='login', object_repr='Login Trainer')
+        self.assertEqual(entry.detail, 'trainer')
 
 
 class LogoutViewTests(TestCase):
@@ -93,6 +133,16 @@ class ChangePasswordViewTests(TestCase):
         self.assertNotEqual(response.data['token'], old_token.key)
         self.assertFalse(Token.objects.filter(key=old_token.key).exists())
         self.assertTrue(Token.objects.filter(user=self.user, key=response.data['token']).exists())
+
+    def test_successful_change_writes_an_audit_log_entry(self):
+        response = self._post(current_password='OldPass123!', new_password='NewPass456!')
+        self.assertEqual(response.status_code, 200)
+        entry = AuditLog.objects.get(action='password_change', object_repr='change_pw_user')
+        self.assertEqual(entry.actor_id, self.user.id)
+
+    def test_wrong_current_password_does_not_write_an_audit_log_entry(self):
+        self._post(current_password='WrongPass', new_password='NewPass456!')
+        self.assertFalse(AuditLog.objects.filter(action='password_change').exists())
 
 
 class MeViewTests(TestCase):
@@ -191,6 +241,15 @@ class PasswordResetConfirmViewTests(TestCase):
         response = PasswordResetConfirmView.as_view()(request)
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Token.objects.filter(key=old_token.key).exists())
+
+    def test_successful_reset_writes_an_audit_log_entry(self):
+        request = self.factory.post('/api/auth/password-reset/confirm/', {
+            'uid': self.uidb64, 'token': self.token, 'new_password': 'BrandNewPass789!',
+        }, format='json')
+        response = PasswordResetConfirmView.as_view()(request)
+        self.assertEqual(response.status_code, 204)
+        entry = AuditLog.objects.get(action='password_reset', object_repr='confirm_reset_user')
+        self.assertEqual(entry.actor_id, self.user.id)
 
     def test_invalid_token_is_rejected(self):
         request = self.factory.post('/api/auth/password-reset/confirm/', {

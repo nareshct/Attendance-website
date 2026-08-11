@@ -540,3 +540,96 @@ class TrainerCourseRateInvalidFilterTests(APITestCase):
         force_authenticate(request, user=admin)
         response = TrainerCourseRateViewSet.as_view({'get': 'list'})(request)
         self.assertEqual(response.status_code, 400)
+
+
+class TrainerCreateEditAuditLogTests(APITestCase):
+    """Onboarding a new trainer, or editing name/phone/rate, previously never hit the
+    audit log at all — a brand-new login-bearing account being created was invisible to
+    the compliance trail."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='trainer_audit_admin', password='x', is_staff=True)
+        self.factory = APIRequestFactory()
+
+    def test_onboarding_a_trainer_writes_an_audit_log_entry(self):
+        request = self.factory.post('/api/trainers/', {
+            'name': 'New Trainer', 'phone_number': '9999999999', 'place': 'Here',
+            'default_rate_per_class': '150', 'username': 'new_trainer_onboard', 'password': 'StrongPass123!',
+        })
+        force_authenticate(request, user=self.admin)
+        response = TrainerViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 201, response.data)
+        entry = AuditLog.objects.get(action='trainer_create', object_repr='New Trainer')
+        self.assertEqual(entry.actor_id, self.admin.id)
+
+    def test_changing_the_default_rate_writes_an_audit_log_entry(self):
+        user = get_user_model().objects.create_user(username='rate_edit_trainer', password='x')
+        trainer = Trainer.objects.create(
+            user=user, name='Rate Edit Trainer', phone_number='0000000000', place='Here', default_rate_per_class=Decimal('100'),
+        )
+        request = self.factory.patch(f'/api/trainers/{trainer.id}/', {'default_rate_per_class': '175'}, format='json')
+        force_authenticate(request, user=self.admin)
+        response = TrainerViewSet.as_view({'patch': 'partial_update'})(request, pk=trainer.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        entry = AuditLog.objects.get(action='trainer_edit', object_repr='Rate Edit Trainer')
+        self.assertIn('100', entry.detail)
+        self.assertIn('175', entry.detail)
+
+    def test_editing_without_changing_name_or_rate_writes_nothing(self):
+        user = get_user_model().objects.create_user(username='noop_edit_trainer', password='x')
+        trainer = Trainer.objects.create(
+            user=user, name='Noop Edit Trainer', phone_number='0000000000', place='Here', default_rate_per_class=Decimal('100'),
+        )
+        request = self.factory.patch(f'/api/trainers/{trainer.id}/', {'place': 'Elsewhere'}, format='json')
+        force_authenticate(request, user=self.admin)
+        response = TrainerViewSet.as_view({'patch': 'partial_update'})(request, pk=trainer.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(AuditLog.objects.filter(action='trainer_edit', object_repr='Noop Edit Trainer').exists())
+
+
+class TrainerCourseRateAuditLogTests(APITestCase):
+    """Per-course rate overrides are money-affecting the same way the flat default rate
+    is — create/edit/delete should all leave a trace."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='rate_override_audit_admin', password='x', is_staff=True)
+        user = get_user_model().objects.create_user(username='rate_override_trainer', password='x')
+        self.trainer = Trainer.objects.create(
+            user=user, name='Override Trainer', phone_number='0000000000', place='Here', default_rate_per_class=Decimal('100'),
+        )
+        self.course = Course.objects.create(name='Override Course', total_classes=24, rate_per_class=Decimal('500'))
+        self.factory = APIRequestFactory()
+
+    def test_creating_an_override_writes_an_audit_log_entry(self):
+        request = self.factory.post('/api/trainer-course-rates/', {
+            'trainer': self.trainer.id, 'course': self.course.id, 'rate_per_class': '120',
+        }, format='json')
+        force_authenticate(request, user=self.admin)
+        response = TrainerCourseRateViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 201, response.data)
+        entry = AuditLog.objects.get(action='trainer_course_rate_create')
+        self.assertIn('Override Trainer', entry.object_repr)
+        self.assertIn('Override Course', entry.object_repr)
+
+    def test_editing_an_override_writes_an_audit_log_entry(self):
+        from .models import TrainerCourseRate
+
+        rate = TrainerCourseRate.objects.create(trainer=self.trainer, course=self.course, rate_per_class=Decimal('120'))
+        request = self.factory.patch(f'/api/trainer-course-rates/{rate.id}/', {'rate_per_class': '140'}, format='json')
+        force_authenticate(request, user=self.admin)
+        response = TrainerCourseRateViewSet.as_view({'patch': 'partial_update'})(request, pk=rate.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        entry = AuditLog.objects.get(action='trainer_course_rate_edit')
+        self.assertIn('120', entry.detail)
+        self.assertIn('140', entry.detail)
+
+    def test_deleting_an_override_writes_an_audit_log_entry(self):
+        from .models import TrainerCourseRate
+
+        rate = TrainerCourseRate.objects.create(trainer=self.trainer, course=self.course, rate_per_class=Decimal('120'))
+        request = self.factory.delete(f'/api/trainer-course-rates/{rate.id}/')
+        force_authenticate(request, user=self.admin)
+        response = TrainerCourseRateViewSet.as_view({'delete': 'destroy'})(request, pk=rate.id)
+        self.assertEqual(response.status_code, 204)
+        entry = AuditLog.objects.get(action='trainer_course_rate_delete')
+        self.assertIn('Override Trainer', entry.object_repr)

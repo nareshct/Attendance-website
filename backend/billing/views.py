@@ -124,11 +124,20 @@ class ClientInvoiceViewSet(ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['post'])
     def mark_received(self, request, pk=None):
-        invoice = self.get_object()
-        if invoice.status == 'received':
-            return Response({'detail': 'Invoice is already marked as received.'}, status=400)
-        invoice.status = 'received'
-        invoice.save(update_fields=['status'])
+        self.get_object()  # 404 if missing, runs the standard permission checks
+
+        # Locked for the duration of this transaction so two concurrent "mark received"
+        # clicks can't both pass the status check before either writes — see
+        # BillingCycleViewSet.close() for the same pattern. Without this, both would
+        # write 'received' and both would log_action, leaving a duplicate audit entry
+        # for one real payment (no double money movement — status is just a flag — but
+        # a misleading audit trail).
+        with transaction.atomic():
+            invoice = ClientInvoice.objects.select_related('client', 'cycle').select_for_update().get(pk=pk)
+            if invoice.status == 'received':
+                return Response({'detail': 'Invoice is already marked as received.'}, status=400)
+            invoice.status = 'received'
+            invoice.save(update_fields=['status'])
         log_action(
             request.user, 'invoice_mark_received',
             f'{invoice.client.company_name} — {invoice.cycle}', f'₹{invoice.total_amount}',
@@ -165,11 +174,15 @@ class PayoutViewSet(ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
-        payout = self.get_object()
-        if payout.paid_status != 'pending':
-            return Response({'detail': f'Payout is already {payout.paid_status}.'}, status=400)
-        payout.paid_status = 'paid'
-        payout.save(update_fields=['paid_status'])
+        self.get_object()  # 404 if missing, runs the standard permission checks
+
+        # See ClientInvoiceViewSet.mark_received for why this is locked.
+        with transaction.atomic():
+            payout = Payout.objects.select_related('trainer', 'cycle').select_for_update().get(pk=pk)
+            if payout.paid_status != 'pending':
+                return Response({'detail': f'Payout is already {payout.paid_status}.'}, status=400)
+            payout.paid_status = 'paid'
+            payout.save(update_fields=['paid_status'])
         log_action(
             request.user, 'payout_mark_paid',
             f'{payout.trainer.name} — {payout.cycle}', f'₹{payout.total_amount}',
@@ -178,11 +191,15 @@ class PayoutViewSet(ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
-        payout = self.get_object()
-        if payout.paid_status != 'pending':
-            return Response({'detail': f'Payout is already {payout.paid_status}.'}, status=400)
-        payout.paid_status = 'cancelled'
-        payout.save(update_fields=['paid_status'])
+        self.get_object()  # 404 if missing, runs the standard permission checks
+
+        # See ClientInvoiceViewSet.mark_received for why this is locked.
+        with transaction.atomic():
+            payout = Payout.objects.select_related('trainer', 'cycle').select_for_update().get(pk=pk)
+            if payout.paid_status != 'pending':
+                return Response({'detail': f'Payout is already {payout.paid_status}.'}, status=400)
+            payout.paid_status = 'cancelled'
+            payout.save(update_fields=['paid_status'])
         log_action(
             request.user, 'payout_cancel',
             f'{payout.trainer.name} — {payout.cycle}', f'₹{payout.total_amount}',

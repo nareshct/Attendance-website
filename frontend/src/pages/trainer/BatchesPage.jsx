@@ -147,7 +147,13 @@ export default function TrainerBatchesPage() {
               </div>
               <div className="flex items-center gap-3">
                 <Badge status={b.status} />
-                <Button variant="primary" size="sm" onClick={() => openLogSession(b)}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={b.status === 'completed' || b.status === 'cancelled'}
+                  title={b.status === 'completed' || b.status === 'cancelled' ? `This batch is ${b.status} — sessions can no longer be logged.` : undefined}
+                  onClick={() => openLogSession(b)}
+                >
                   + Log session
                 </Button>
               </div>
@@ -175,7 +181,7 @@ export default function TrainerBatchesPage() {
                           </a>
                         )}
                       </div>
-                      {s.can_edit && (
+                      {s.can_edit && b.status !== 'completed' && b.status !== 'cancelled' && (
                         <div className="flex items-center gap-1 shrink-0">
                           <button type="button" onClick={() => openEditSession(b, s)} className="text-xs font-medium text-primary hover:underline">
                             Edit

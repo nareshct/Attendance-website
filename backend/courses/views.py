@@ -5,6 +5,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.viewsets import ModelViewSet
 
+from audit.services import log_action
 from config.permissions import IsAdmin, IsAdminOrTrainer
 
 from .models import Course, CourseMaterial
@@ -38,6 +39,15 @@ class CourseViewSet(ModelViewSet):
         if self.action in ('list', 'retrieve') and not self.request.user.is_staff:
             return TrainerCourseSerializer
         return CourseSerializer
+
+    def perform_update(self, serializer):
+        old_rate = serializer.instance.rate_per_class
+        course = serializer.save()
+        # rate_per_class also gets its own RateHistory entry (see Course.save() ->
+        # log_rate_change) for billing lookups, but that trail has no actor — this is
+        # the "who changed it" record for a money-affecting edit.
+        if old_rate != course.rate_per_class:
+            log_action(self.request.user, 'course_rate_change', course.name, f'₹{old_rate} → ₹{course.rate_per_class}')
 
 
 class CourseMaterialViewSet(ModelViewSet):

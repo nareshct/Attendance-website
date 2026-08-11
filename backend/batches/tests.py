@@ -1200,11 +1200,12 @@ class TrainerSelfServiceTests(APITestCase):
 
 
 class BatchEnrollmentReportCertificateTests(APITestCase):
-    """report/certificate mirror EnrollmentViewSet.report/.certificate (see
-    enrollments/tests.py) but scoped to a BatchEnrollment: any admin, or a
-    trainer whose name is on the batch, can pull the report; the certificate
-    additionally requires the whole Batch to be 'completed' and the specific
-    BatchEnrollment to still be 'active'."""
+    """report/certificate are admin-only on BatchEnrollmentViewSet — unlike
+    EnrollmentViewSet.report/.certificate (see enrollments/tests.py), there's no
+    trainer-facing frontend page to reach these for a batch, so the earlier
+    IsAdminOrTrainer grant was a backend-only capability with no matching UI and has
+    been removed. The certificate additionally requires the whole Batch to be
+    'completed' and the specific BatchEnrollment to still be 'active'."""
 
     def setUp(self):
         self.factory = APIRequestFactory()
@@ -1227,9 +1228,9 @@ class BatchEnrollmentReportCertificateTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
 
-    def test_owning_trainer_can_download_report(self):
+    def test_trainer_on_the_batch_cannot_download_report(self):
         response = self._get('report', self.trainer.user)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 403)
 
     def test_non_owning_trainer_cannot_download_report(self):
         response = self._get('report', self.other_trainer.user)
@@ -1253,6 +1254,12 @@ class BatchEnrollmentReportCertificateTests(APITestCase):
         response = self._get('certificate', self.admin)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
+
+    def test_trainer_on_the_batch_cannot_download_certificate_even_once_completed(self):
+        self.batch.status = 'completed'
+        self.batch.save(update_fields=['status'])
+        response = self._get('certificate', self.trainer.user)
+        self.assertEqual(response.status_code, 403)
 
 
 class BatchSessionReassignmentBlockedTests(APITestCase):
@@ -1333,3 +1340,180 @@ class BatchPayoutDeleteGuardTests(APITestCase):
         BatchPayoutViewSet.as_view({'delete': 'destroy'})(request, pk=self.payout.id)
 
         self.assertTrue(AuditLog.objects.filter(action='batch_payout_delete').exists())
+
+
+class BatchLifecycleLocksTests(APITestCase):
+    """A batch marked completed/cancelled previously stayed fully editable — new
+    enrollments, imports, and session logging all kept working. status is now a real
+    lock, not just a label, matching accepting_enrollments' existing "blocks new
+    sign-ups" behavior but for the whole batch."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='lifecycle_admin', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='lifecycle_trainer', name='Priya')
+        self.factory = APIRequestFactory()
+
+    def test_cannot_add_a_student_to_a_completed_batch(self):
+        batch = _make_batch()
+        batch.status = 'completed'
+        batch.save(update_fields=['status'])
+
+        request = self.factory.post('/api/batch-enrollments/', {
+            'batch': batch.id, 'name': 'Late Joiner', 'phone_number': '9000000000',
+        })
+        force_authenticate(request, user=self.admin)
+        response = BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(BatchEnrollment.objects.filter(batch=batch, student__name='Late Joiner').exists())
+
+    def test_cannot_add_a_student_to_a_cancelled_batch(self):
+        batch = _make_batch()
+        batch.status = 'cancelled'
+        batch.save(update_fields=['status'])
+
+        request = self.factory.post('/api/batch-enrollments/', {
+            'batch': batch.id, 'name': 'Late Joiner', 'phone_number': '9000000001',
+        })
+        force_authenticate(request, user=self.admin)
+        response = BatchEnrollmentViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_import_is_rejected_for_a_completed_batch(self):
+        from .services import import_students_from_excel
+
+        batch = _make_batch()
+        batch.status = 'completed'
+        batch.save(update_fields=['status'])
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(['Name', 'Phone Number'])
+        sheet.append(['Import Kid', '9000000002'])
+        buffer = BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+
+        with self.assertRaises(ValueError):
+            import_students_from_excel(batch, buffer)
+
+    def test_cannot_log_a_session_on_a_completed_batch(self):
+        batch = _make_batch(trainer_names='Priya')
+        batch.status = 'completed'
+        batch.save(update_fields=['status'])
+
+        request = self.factory.post('/api/batch-sessions/', {
+            'batch': batch.id, 'date': '2026-07-10', 'conducted_by_name': 'Priya',
+        })
+        force_authenticate(request, user=self.admin)
+        response = BatchSessionViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(BatchSession.objects.filter(batch=batch).exists())
+
+    def test_admin_cannot_edit_a_session_on_a_now_completed_batch(self):
+        batch = _make_batch(trainer_names='Priya')
+        session = BatchSession.objects.create(batch=batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya')
+        batch.status = 'completed'
+        batch.save(update_fields=['status'])
+
+        request = self.factory.patch(f'/api/batch-sessions/{session.id}/', {'topic_covered': 'Edited after close'}, format='json')
+        force_authenticate(request, user=self.admin)
+        response = BatchSessionViewSet.as_view({'patch': 'partial_update'})(request, pk=session.id)
+
+        self.assertEqual(response.status_code, 400)
+        session.refresh_from_db()
+        self.assertNotEqual(session.topic_covered, 'Edited after close')
+
+    def test_admin_cannot_delete_a_session_on_a_now_completed_batch(self):
+        batch = _make_batch(trainer_names='Priya')
+        session = BatchSession.objects.create(batch=batch, date=datetime.date(2026, 7, 5), conducted_by_name='Priya')
+        batch.status = 'completed'
+        batch.save(update_fields=['status'])
+
+        request = self.factory.delete(f'/api/batch-sessions/{session.id}/')
+        force_authenticate(request, user=self.admin)
+        response = BatchSessionViewSet.as_view({'delete': 'destroy'})(request, pk=session.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(BatchSession.objects.filter(id=session.id).exists())
+
+    def test_can_still_log_a_session_on_an_ongoing_batch(self):
+        batch = _make_batch(trainer_names='Priya')
+        request = self.factory.post('/api/batch-sessions/', {
+            'batch': batch.id, 'date': '2026-07-10', 'conducted_by_name': 'Priya',
+        })
+        force_authenticate(request, user=self.admin)
+        response = BatchSessionViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 201, response.data)
+
+
+class BatchEnrollmentWithdrawReactivateIdempotencyTests(APITestCase):
+    """withdraw/reactivate previously had no status guard, unlike the 1:1
+    EnrollmentViewSet equivalents — a repeated/racy call on an already-withdrawn (or
+    already-active) batch enrollment would silently overwrite refunded_amount/
+    refund_note, or no-op, instead of being rejected."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='idempotency_admin', password='x', is_staff=True)
+        self.factory = APIRequestFactory()
+        self.batch = _make_batch()
+        self.enrollment = BatchEnrollment.objects.create(
+            batch=self.batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1),
+        )
+
+    def _withdraw(self, **body):
+        request = self.factory.post(f'/api/batch-enrollments/{self.enrollment.id}/withdraw/', body, format='json')
+        force_authenticate(request, user=self.admin)
+        return BatchEnrollmentViewSet.as_view({'post': 'withdraw'})(request, pk=self.enrollment.id)
+
+    def _reactivate(self):
+        request = self.factory.post(f'/api/batch-enrollments/{self.enrollment.id}/reactivate/')
+        force_authenticate(request, user=self.admin)
+        return BatchEnrollmentViewSet.as_view({'post': 'reactivate'})(request, pk=self.enrollment.id)
+
+    def test_cannot_withdraw_an_already_withdrawn_enrollment(self):
+        first = self._withdraw(refund_amount='500')
+        self.assertEqual(first.status_code, 200, first.data)
+
+        second = self._withdraw(refund_amount='9999')
+        self.assertEqual(second.status_code, 400)
+
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.refunded_amount, Decimal('500'))
+
+    def test_cannot_reactivate_an_already_active_enrollment(self):
+        response = self._reactivate()
+        self.assertEqual(response.status_code, 400)
+
+    def test_can_reactivate_a_withdrawn_enrollment_exactly_once(self):
+        self._withdraw()
+        first = self._reactivate()
+        self.assertEqual(first.status_code, 200, first.data)
+
+        second = self._reactivate()
+        self.assertEqual(second.status_code, 400)
+
+
+class BatchTotalClassesLockedAfterEnrollmentTests(APITestCase):
+    """total_classes drives create_batch_installments' due_at_sessions milestones at
+    signup time and is never recalculated — locking it once enrolled mirrors the
+    existing fee_per_student/payment_type lock, for the same reason."""
+
+    def test_cannot_change_total_classes_once_a_student_is_enrolled(self):
+        from .serializers import BatchSerializer
+
+        batch = _make_batch(total_classes=24)
+        BatchEnrollment.objects.create(batch=batch, student=_make_student(), joined_date=datetime.date(2026, 7, 1))
+
+        serializer = BatchSerializer(batch, data={'total_classes': 30}, partial=True)
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('total_classes', str(serializer.errors))
+
+    def test_can_still_change_total_classes_before_anyone_enrolls(self):
+        from .serializers import BatchSerializer
+
+        batch = _make_batch(total_classes=24)
+        serializer = BatchSerializer(batch, data={'total_classes': 30}, partial=True)
+        self.assertTrue(serializer.is_valid(), serializer.errors)

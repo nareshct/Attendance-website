@@ -206,6 +206,8 @@ def import_students_from_excel(batch, file_obj):
     multi-installment batches stay pending, same as a manually added enrollment — the
     admin marks those from the batch page as the batch progresses.
     """
+    if batch.status in ('completed', 'cancelled'):
+        raise ValueError(f'This batch is {batch.get_status_display().lower()} — it can no longer be changed.')
     if not batch.accepting_enrollments:
         raise ValueError('This batch is closed to new enrollments.')
 
