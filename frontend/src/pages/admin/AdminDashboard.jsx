@@ -14,6 +14,23 @@ function daysAgo(n) {
   return d.toISOString().slice(0, 10)
 }
 
+// The dashboard needs every row to compute accurate counts/totals, unlike list pages
+// that page incrementally via usePaginatedList — so walk every page here instead of
+// relying on apiRequest's single-page fetch, which throws once a list passes PAGE_SIZE
+// (see unwrapPaginated in api/client.js) rather than silently under-counting.
+async function fetchAllPages(api, path) {
+  const separator = path.includes('?') ? '&' : '?'
+  const all = []
+  let page = 1
+  while (true) {
+    const data = await api(`${path}${separator}page=${page}`, { raw: true })
+    all.push(...data.results)
+    if (!data.next) break
+    page += 1
+  }
+  return all
+}
+
 export default function AdminDashboard() {
   const api = useApi()
   const [stats, setStats] = useState(null)
@@ -43,12 +60,12 @@ export default function AdminDashboard() {
     async function load() {
       try {
         const [students, trainers, enrollments, history, alertData, batches] = await Promise.all([
-          api('/api/students/'),
-          api('/api/trainers/'),
-          api('/api/enrollments/'),
+          fetchAllPages(api, '/api/students/'),
+          fetchAllPages(api, '/api/trainers/'),
+          fetchAllPages(api, '/api/enrollments/'),
           api('/api/cycle-revenue/history/'),
           api('/api/alerts/'),
-          api('/api/batches/'),
+          fetchAllPages(api, '/api/batches/'),
         ])
         if (cancelled) return
         const currentCycle = history.find((c) => c.status === 'open')
