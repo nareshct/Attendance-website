@@ -46,9 +46,11 @@ export default function MarkAttendancePage() {
   const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
   // Set when the backend blocks a create with 409 (a class is already marked for this
-  // student/date) — offers the trainer a way to say "this is genuinely a second class
-  // today" instead of just being stuck. See AttendanceViewSet.create().
+  // student/date) — opens a confirm modal offering the trainer a way to say "this is
+  // genuinely a second class today" instead of just being stuck. See AttendanceViewSet.create().
   const [duplicateConfirmPending, setDuplicateConfirmPending] = useState(false)
+  const [duplicateMessage, setDuplicateMessage] = useState('')
+  const [duplicateError, setDuplicateError] = useState('')
 
   const [editingId, setEditingId] = useState(null)
   const [editDate, setEditDate] = useState('')
@@ -93,7 +95,11 @@ export default function MarkAttendancePage() {
 
   async function submitAttendance(confirmDuplicate) {
     setSubmitting(true)
-    setError('')
+    if (confirmDuplicate) {
+      setDuplicateError('')
+    } else {
+      setError('')
+    }
     setSuccess('')
     try {
       const result = await api('/api/attendance/', {
@@ -110,12 +116,14 @@ export default function MarkAttendancePage() {
       }
       setForm({ enrollment: '', date: today(), topic_covered: '' })
     } catch (err) {
-      if (err.status === 409) {
+      if (!confirmDuplicate && err.status === 409) {
+        setDuplicateMessage(err.message)
         setDuplicateConfirmPending(true)
+      } else if (confirmDuplicate) {
+        setDuplicateError(err.message)
       } else {
-        setDuplicateConfirmPending(false)
+        setError(err.message)
       }
-      setError(err.message)
     } finally {
       setSubmitting(false)
     }
@@ -128,6 +136,11 @@ export default function MarkAttendancePage() {
 
   function confirmSecondClass() {
     submitAttendance(true)
+  }
+
+  function closeDuplicateConfirm() {
+    setDuplicateConfirmPending(false)
+    setDuplicateError('')
   }
 
   function openEdit(h) {
@@ -227,20 +240,9 @@ export default function MarkAttendancePage() {
           {error && <p className="text-error text-sm">{error}</p>}
           {success && <p className="text-success text-sm">{success}</p>}
 
-          {duplicateConfirmPending ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="ghost" size="lg" disabled={submitting} onClick={confirmSecondClass}>
-                {submitting ? 'Sending…' : 'Yes, this is a genuine second class — send to admin'}
-              </Button>
-              <Button type="submit" size="lg" disabled={submitting}>
-                {submitting ? 'Saving…' : 'Mark class taken'}
-              </Button>
-            </div>
-          ) : (
-            <Button type="submit" size="lg" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Mark class taken'}
-            </Button>
-          )}
+          <Button type="submit" size="lg" disabled={submitting}>
+            {submitting ? 'Saving…' : 'Mark class taken'}
+          </Button>
         </form>
       </Card>
 
@@ -334,6 +336,18 @@ export default function MarkAttendancePage() {
           </tbody>
         </table>
       </Card>
+
+      <ConfirmDialog
+        open={duplicateConfirmPending}
+        onClose={closeDuplicateConfirm}
+        onConfirm={confirmSecondClass}
+        title="Second class today?"
+        message={`${duplicateMessage} This will be sent to admin for approval — it will only count once admin approves it.`}
+        confirmLabel="Yes, send to admin"
+        busyLabel="Sending…"
+        busy={submitting}
+        error={duplicateError}
+      />
 
       <Modal open={editingId != null} onClose={closeEdit} title="Edit attendance record">
         <div className="space-y-3">
