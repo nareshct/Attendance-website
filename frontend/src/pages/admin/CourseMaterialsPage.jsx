@@ -161,7 +161,7 @@ export default function CourseMaterialsPage() {
                   </button>
                   <button
                     disabled={busy === `delete-${m.id}`}
-                    onClick={() => setDeleteTarget(m.id)}
+                    onClick={() => { setDeleteTarget(m.id); setError('') }}
                     className="text-red-600 hover:underline disabled:opacity-60 focus-ring"
                   >
                     Delete
@@ -178,7 +178,7 @@ export default function CourseMaterialsPage() {
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        onClose={() => setDeleteTarget(null)}
+        onClose={() => { setDeleteTarget(null); setError('') }}
         onConfirm={handleDelete}
         title="Delete material"
         message="Delete this material? This cannot be undone."
@@ -186,6 +186,7 @@ export default function CourseMaterialsPage() {
         busyLabel="Deleting…"
         danger
         busy={busy === `delete-${deleteTarget}`}
+        error={error}
       />
     </div>
   )

@@ -105,6 +105,65 @@ class ClientLogoTaglineTests(APITestCase):
         with self.assertRaises(ValidationError):
             validate_logo_size(oversized)
 
+    def test_can_remove_an_existing_logo(self):
+        # A multipart PATCH has no native way to send "clear this field" — remove_logo
+        # is the explicit signal for it. See ClientSerializer.update().
+        client_obj = Client.objects.create(company_name='Remove Logo Co', contact_phone='123', rate_per_class=Decimal('200'))
+        client_obj.logo = _tiny_png()
+        client_obj.save()
+        self.assertTrue(client_obj.logo)
+
+        factory = APIRequestFactory()
+        request = factory.patch(
+            f'/api/clients/{client_obj.id}/', data={'remove_logo': 'true'}, format='multipart',
+        )
+        force_authenticate(request, user=self.admin)
+        response = ClientViewSet.as_view({'patch': 'partial_update'})(request, pk=client_obj.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        client_obj.refresh_from_db()
+        self.assertFalse(client_obj.logo)
+
+    def test_remove_logo_is_ignored_on_create(self):
+        # remove_logo has a default, so DRF always includes it in validated_data even
+        # when not sent — must not be passed through to Client.objects.create().
+        response = self._create(self.admin, remove_logo='true')
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_sending_a_new_logo_wins_over_remove_logo_in_the_same_request(self):
+        client_obj = Client.objects.create(company_name='Both Fields Co', contact_phone='123', rate_per_class=Decimal('200'))
+        client_obj.logo = _tiny_png('old.png')
+        client_obj.save()
+
+        factory = APIRequestFactory()
+        request = factory.patch(
+            f'/api/clients/{client_obj.id}/',
+            data={'remove_logo': 'true', 'logo': _tiny_png('new.png')}, format='multipart',
+        )
+        force_authenticate(request, user=self.admin)
+        response = ClientViewSet.as_view({'patch': 'partial_update'})(request, pk=client_obj.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        client_obj.refresh_from_db()
+        self.assertTrue(client_obj.logo)
+        self.assertIn('new', client_obj.logo.name)
+
+    def test_omitting_remove_logo_leaves_an_existing_logo_untouched(self):
+        client_obj = Client.objects.create(company_name='Untouched Logo Co', contact_phone='123', rate_per_class=Decimal('200'))
+        client_obj.logo = _tiny_png()
+        client_obj.save()
+
+        factory = APIRequestFactory()
+        request = factory.patch(
+            f'/api/clients/{client_obj.id}/', data={'tagline': 'Unrelated edit'}, format='multipart',
+        )
+        force_authenticate(request, user=self.admin)
+        response = ClientViewSet.as_view({'patch': 'partial_update'})(request, pk=client_obj.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        client_obj.refresh_from_db()
+        self.assertTrue(client_obj.logo)
+
 
 class ClientSummaryIncludesArchivedClientsTests(APITestCase):
     """summary()'s total_pending must keep counting an archived client's unpaid

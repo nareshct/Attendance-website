@@ -1,6 +1,7 @@
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Client, ClientContact, ClientCourseRate
@@ -28,15 +29,36 @@ class ClientSerializer(serializers.ModelSerializer):
     # that build a Client instance outside that queryset (e.g. serializer.save() in create()).
     active_student_count = serializers.SerializerMethodField()
     overdue_invoice_count = serializers.SerializerMethodField()
+    # A multipart PATCH has no native way to send "clear this file field" (there's no
+    # null in form-data) — this is the explicit signal for it instead. Mutually
+    # exclusive with actually sending a new 'logo' file in the same request; see
+    # update() below.
+    remove_logo = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = Client
         fields = [
             'id', 'company_name', 'contact_phone', 'contact_email', 'rate_per_class',
-            'status', 'logo', 'tagline', 'course_rates', 'contacts', 'pending_amount',
+            'status', 'logo', 'tagline', 'remove_logo', 'course_rates', 'contacts', 'pending_amount',
             'active_student_count', 'overdue_invoice_count',
         ]
         read_only_fields = ['status']
+
+    def create(self, validated_data):
+        # remove_logo has a default, so it's always present in validated_data (even on
+        # create, where there's nothing to remove yet) — not a real model field, so it
+        # can't be passed through to Client.objects.create().
+        validated_data.pop('remove_logo', None)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if validated_data.pop('remove_logo', False):
+            # Only the DB reference is cleared, not the underlying file on disk — this
+            # app doesn't clean up replaced/removed media files anywhere else either
+            # (see CourseMaterial), so this stays consistent with that.
+            instance.logo = None
+            instance.save(update_fields=['logo'])
+        return super().update(instance, validated_data)
 
     def get_pending_amount(self, obj):
         """Live current cycle billing so far + pending pay-ins from closed cycles.
@@ -70,5 +92,5 @@ class ClientSerializer(serializers.ModelSerializer):
 
         if isinstance(getattr(obj, 'overdue_invoice_count', None), int):
             return obj.overdue_invoice_count
-        cutoff = date.today() - timedelta(days=ClientInvoice.OVERDUE_GRACE_DAYS)
+        cutoff = timezone.localdate() - timedelta(days=ClientInvoice.OVERDUE_GRACE_DAYS)
         return obj.invoices.filter(status='pending', cycle__cycle_end__lt=cutoff).count()

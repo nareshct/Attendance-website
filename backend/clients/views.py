@@ -1,8 +1,9 @@
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -38,7 +39,7 @@ class ClientViewSet(ModelViewSet):
         # call multiplies rows before aggregating (Django's multi-relation fan-out), which
         # would silently inflate pending_amount. A Subquery is independent of the outer
         # join and of each other, so this sidesteps that entirely.
-        cutoff = date.today() - timedelta(days=ClientInvoice.OVERDUE_GRACE_DAYS)
+        cutoff = timezone.localdate() - timedelta(days=ClientInvoice.OVERDUE_GRACE_DAYS)
         active_students = (
             Student.objects.filter(client=OuterRef('pk'), status='active')
             .order_by().values('client').annotate(c=Count('id')).values('c')

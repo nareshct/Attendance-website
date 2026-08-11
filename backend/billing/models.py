@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from django.utils import timezone
 
 from attendance.models import Attendance
 from clients.models import Client
@@ -157,11 +158,14 @@ class ClientInvoice(models.Model):
 
     @property
     def is_overdue(self):
-        return self.status == 'pending' and date.today() > self.due_date
+        # timezone.localdate() (settings.TIME_ZONE, not the server's OS clock) rather
+        # than date.today() — with USE_TZ=True, a naive "today" can be off by a day
+        # right around midnight UTC if TIME_ZONE isn't the server's local zone.
+        return self.status == 'pending' and timezone.localdate() > self.due_date
 
     @property
     def days_overdue(self):
-        return (date.today() - self.due_date).days if self.is_overdue else 0
+        return (timezone.localdate() - self.due_date).days if self.is_overdue else 0
 
 
 class RateHistory(models.Model):

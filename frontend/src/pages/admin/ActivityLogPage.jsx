@@ -4,12 +4,48 @@ import { usePaginatedList } from '../../hooks/usePaginatedList'
 import { formatDateTime } from '../../utils/date'
 
 const ACTION_LABELS = {
+  // Billing / invoicing
   invoice_mark_received: 'Marked invoice received',
   payout_mark_paid: 'Marked payout paid',
+  payout_cancel: 'Cancelled payout',
+  billing_cycle_close: 'Closed billing cycle',
+  billing_cycle_reopen: 'Reopened billing cycle',
   installment_mark_paid: 'Marked installment paid',
   installment_revoke: 'Undid installment payment',
+  payment_plan_recalculate: 'Recalculated payment plan',
+
+  // Enrollments / attendance
   enrollment_transfer: 'Transferred enrollment',
+  enrollment_withdraw: 'Withdrew enrollment',
+  enrollment_status_change: 'Enrollment status changed',
   attendance_delete: 'Deleted attendance record',
+  substitute_assign: 'Assigned substitute trainer',
+  substitute_cancel: 'Cancelled substitute assignment',
+
+  // Students
+  student_archive: 'Archived student',
+  student_unarchive: 'Unarchived student',
+  parent_link_create: 'Created parent share link',
+  parent_link_regenerate: 'Regenerated parent share link',
+  parent_link_revoke: 'Revoked parent share link',
+
+  // Trainers
+  trainer_create: 'Onboarded trainer',
+  trainer_edit: 'Edited trainer details',
+  trainer_archive: 'Archived trainer',
+  trainer_unarchive: 'Unarchived trainer',
+  trainer_reset_password: "Reset trainer's password",
+  trainer_course_rate_create: 'Added trainer course-rate override',
+  trainer_course_rate_edit: 'Edited trainer course-rate override',
+  trainer_course_rate_delete: 'Removed trainer course-rate override',
+  payout_settle_current_cycle: 'Settled current-cycle payout early',
+
+  // Courses / clients
+  course_rate_change: 'Changed course rate',
+  client_archive: 'Archived client',
+  client_unarchive: 'Unarchived client',
+
+  // Batches
   batch_enroll: 'Added student to batch',
   batch_withdraw: 'Withdrew student from batch',
   batch_reactivate: 'Reactivated withdrawn batch student',
@@ -21,7 +57,16 @@ const ACTION_LABELS = {
   batch_installment_amount_edit: 'Edited batch installment amount',
   batch_payout_create: 'Added batch payout',
   batch_payout_mark_paid: 'Marked batch payout paid',
+  batch_payout_cancel: 'Cancelled batch payout',
+  batch_payout_delete: 'Deleted batch payout',
+  batch_session_edit: 'Edited batch session',
+  batch_session_delete: 'Deleted batch session',
   batch_delete: 'Deleted batch',
+
+  // Auth
+  login: 'Logged in',
+  password_change: 'Changed password',
+  password_reset: 'Reset password',
 }
 
 export default function ActivityLogPage() {

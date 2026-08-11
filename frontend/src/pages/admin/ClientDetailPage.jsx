@@ -33,6 +33,7 @@ export default function ClientDetailPage() {
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState(null)
   const [logoFile, setLogoFile] = useState(null)
+  const [removeLogo, setRemoveLogo] = useState(false)
   const [profileError, setProfileError] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
 
@@ -216,6 +217,7 @@ export default function ClientDetailPage() {
       tagline: client.tagline ?? '',
     })
     setLogoFile(null)
+    setRemoveLogo(false)
     setProfileError('')
     setContactError('')
     setRateError('')
@@ -226,6 +228,7 @@ export default function ClientDetailPage() {
     setEditingProfile(false)
     setProfileForm(null)
     setLogoFile(null)
+    setRemoveLogo(false)
     setProfileError('')
     setShowContactForm(false)
     setContactForm(EMPTY_CONTACT)
@@ -245,6 +248,7 @@ export default function ClientDetailPage() {
       const data = new FormData()
       Object.entries(profileForm).forEach(([key, value]) => data.append(key, value))
       if (logoFile) data.append('logo', logoFile)
+      else if (removeLogo) data.append('remove_logo', 'true')
       await apiUpload(`/api/clients/${id}/`, data, auth.token, 'PATCH')
       closeEditProfile()
       await loadClient()
@@ -355,8 +359,35 @@ export default function ClientDetailPage() {
           <div>
             <label className="block text-xs text-text-secondary mb-1">Logo</label>
             <div className="flex items-center gap-2">
-              {client.logo && !logoFile && <img src={client.logo} alt="" className="w-9 h-9 rounded-lg object-contain bg-white border border-gray-200" />}
-              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setLogoFile(e.target.files[0] || null)} className="input" />
+              {client.logo && !logoFile && !removeLogo && (
+                <>
+                  <img src={client.logo} alt="" className="w-9 h-9 rounded-lg object-contain bg-white border border-gray-200" />
+                  <button
+                    type="button"
+                    onClick={() => setRemoveLogo(true)}
+                    className="text-xs font-medium text-error hover:underline focus-ring shrink-0"
+                  >
+                    Remove
+                  </button>
+                </>
+              )}
+              {removeLogo && (
+                <span className="text-xs text-text-tertiary shrink-0">
+                  Logo will be removed —{' '}
+                  <button type="button" onClick={() => setRemoveLogo(false)} className="text-primary hover:underline focus-ring">
+                    Undo
+                  </button>
+                </span>
+              )}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={(e) => {
+                  setLogoFile(e.target.files[0] || null)
+                  if (e.target.files[0]) setRemoveLogo(false)
+                }}
+                className="input"
+              />
             </div>
           </div>
           {profileError && <p className="sm:col-span-3 text-error text-xs">{profileError}</p>}

@@ -29,7 +29,16 @@ from .services import (
     historical_rate,
     snapshot_cycle_revenue,
 )
-from .views import BillingCycleViewSet, ClientInvoiceViewSet, CycleRevenueHistoryView, PayoutViewSet
+from .views import (
+    AdminAlertsView,
+    BillingCycleViewSet,
+    ClientInvoiceViewSet,
+    CycleRevenueHistoryView,
+    CycleRevenueView,
+    MyCurrentCycleView,
+    MyEarningsView,
+    PayoutViewSet,
+)
 
 
 def _make_trainer(username, rate):
@@ -296,6 +305,191 @@ class CycleRevenueHistoryLimitParamTests(APITestCase):
         response = CycleRevenueHistoryView.as_view()(request)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
+
+
+class ClientInvoiceOverdueTests(TestCase):
+    """is_overdue/days_overdue use timezone.localdate() rather than the naive
+    date.today() — functional behavior is unchanged, this just locks in the basic
+    true/false/day-count cases across that swap."""
+
+    def setUp(self):
+        self.client_obj = Client.objects.create(company_name='Overdue Co', contact_phone='123', rate_per_class=Decimal('200'))
+
+    def _invoice(self, cycle_end, status='pending'):
+        cycle = BillingCycle.objects.create(
+            cycle_start=cycle_end - datetime.timedelta(days=14), cycle_end=cycle_end, status='closed',
+        )
+        return ClientInvoice.objects.create(
+            client=self.client_obj, cycle=cycle, total_classes=5, total_amount=Decimal('1000.00'), status=status,
+        )
+
+    def test_pending_invoice_past_the_grace_period_is_overdue(self):
+        far_past = datetime.date.today() - datetime.timedelta(days=30)
+        invoice = self._invoice(far_past)
+        self.assertTrue(invoice.is_overdue)
+        self.assertEqual(invoice.days_overdue, 30 - ClientInvoice.OVERDUE_GRACE_DAYS)
+
+    def test_pending_invoice_within_the_grace_period_is_not_overdue(self):
+        recent = datetime.date.today()
+        invoice = self._invoice(recent)
+        self.assertFalse(invoice.is_overdue)
+        self.assertEqual(invoice.days_overdue, 0)
+
+    def test_received_invoice_is_never_overdue_regardless_of_age(self):
+        far_past = datetime.date.today() - datetime.timedelta(days=60)
+        invoice = self._invoice(far_past, status='received')
+        self.assertFalse(invoice.is_overdue)
+        self.assertEqual(invoice.days_overdue, 0)
+
+
+class AdminOnlyEndpointPermissionTests(APITestCase):
+    """CycleRevenueView, CycleRevenueHistoryView, AdminAlertsView, and
+    BillingCycleViewSet.generate_current/current_payouts are all IsAdmin-only —
+    previously unverified by any test, unlike the equally-sensitive mark_paid/cancel/
+    mark_received actions elsewhere in this file. A trainer has no business seeing
+    cross-trainer/cross-client revenue and payout figures."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_only_perm', password='x', is_staff=True)
+        self.trainer = _make_trainer('trainer_admin_only_perm', Decimal('100'))
+        self.factory = APIRequestFactory()
+
+    def test_trainer_cannot_view_cycle_revenue(self):
+        request = self.factory.get('/api/cycle-revenue/')
+        force_authenticate(request, user=self.trainer.user)
+        response = CycleRevenueView.as_view()(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_view_cycle_revenue(self):
+        request = self.factory.get('/api/cycle-revenue/')
+        force_authenticate(request, user=self.admin)
+        response = CycleRevenueView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+
+    def test_trainer_cannot_view_cycle_revenue_history(self):
+        request = self.factory.get('/api/cycle-revenue/history/')
+        force_authenticate(request, user=self.trainer.user)
+        response = CycleRevenueHistoryView.as_view()(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_trainer_cannot_view_admin_alerts(self):
+        request = self.factory.get('/api/alerts/')
+        force_authenticate(request, user=self.trainer.user)
+        response = AdminAlertsView.as_view()(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_view_admin_alerts(self):
+        request = self.factory.get('/api/alerts/')
+        force_authenticate(request, user=self.admin)
+        response = AdminAlertsView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+
+    def test_trainer_cannot_generate_current_cycle(self):
+        request = self.factory.post('/api/billing-cycles/generate_current/')
+        force_authenticate(request, user=self.trainer.user)
+        response = BillingCycleViewSet.as_view({'post': 'generate_current'})(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_generate_current_cycle(self):
+        request = self.factory.post('/api/billing-cycles/generate_current/')
+        force_authenticate(request, user=self.admin)
+        response = BillingCycleViewSet.as_view({'post': 'generate_current'})(request)
+        self.assertIn(response.status_code, (200, 201))
+
+    def test_trainer_cannot_view_current_payouts(self):
+        cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 3, 1), cycle_end=datetime.date(2026, 3, 15), status='open',
+        )
+        request = self.factory.get(f'/api/billing-cycles/{cycle.id}/current_payouts/')
+        force_authenticate(request, user=self.trainer.user)
+        response = BillingCycleViewSet.as_view({'get': 'current_payouts'})(request, pk=cycle.id)
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_view_current_payouts(self):
+        cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 3, 1), cycle_end=datetime.date(2026, 3, 15), status='open',
+        )
+        request = self.factory.get(f'/api/billing-cycles/{cycle.id}/current_payouts/')
+        force_authenticate(request, user=self.admin)
+        response = BillingCycleViewSet.as_view({'get': 'current_payouts'})(request, pk=cycle.id)
+        self.assertEqual(response.status_code, 200)
+
+
+class TrainerFacingBillingEndpointTests(APITestCase):
+    """MyEarningsView/MyCurrentCycleView are IsTrainer-only and must scope strictly to
+    the requesting trainer — previously untested end-to-end (only exercised indirectly
+    through other apps' tests)."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_trainer_facing', password='x', is_staff=True)
+        self.trainer = _make_trainer('trainer_facing_own', Decimal('100'))
+        self.other_trainer = _make_trainer('trainer_facing_other', Decimal('100'))
+        self.cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 4, 1), cycle_end=datetime.date(2026, 4, 15), status='closed',
+        )
+        self.own_payout = Payout.objects.create(
+            trainer=self.trainer, cycle=self.cycle, total_classes=5, total_amount=Decimal('500.00'), paid_status='pending',
+        )
+        Payout.objects.create(
+            trainer=self.other_trainer, cycle=self.cycle, total_classes=3, total_amount=Decimal('300.00'), paid_status='pending',
+        )
+        self.factory = APIRequestFactory()
+
+    def test_admin_cannot_use_the_trainer_facing_earnings_view(self):
+        request = self.factory.get('/api/my-earnings/')
+        force_authenticate(request, user=self.admin)
+        response = MyEarningsView.as_view()(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_trainer_only_sees_their_own_payouts(self):
+        request = self.factory.get('/api/my-earnings/')
+        force_authenticate(request, user=self.trainer.user)
+        response = MyEarningsView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        payout_ids = [p['id'] for p in response.data['results']]
+        self.assertIn(self.own_payout.id, payout_ids)
+        self.assertEqual(len(payout_ids), 1)
+
+    def test_admin_cannot_use_the_trainer_facing_current_cycle_view(self):
+        request = self.factory.get('/api/my-earnings/current/')
+        force_authenticate(request, user=self.admin)
+        response = MyCurrentCycleView.as_view()(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_trainer_can_view_their_own_current_cycle(self):
+        request = self.factory.get('/api/my-earnings/current/')
+        force_authenticate(request, user=self.trainer.user)
+        response = MyCurrentCycleView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+
+
+class ClientInvoicePdfPermissionTests(APITestCase):
+    """A trainer has no business seeing a B2B client's invoice — untested until now."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_invoice_pdf_perm', password='x', is_staff=True)
+        self.trainer = _make_trainer('trainer_invoice_pdf_perm', Decimal('100'))
+        client_obj = Client.objects.create(company_name='PDF Perm Co', contact_phone='123', rate_per_class=Decimal('200'))
+        cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 5, 1), cycle_end=datetime.date(2026, 5, 15), status='closed',
+        )
+        self.invoice = ClientInvoice.objects.create(
+            client=client_obj, cycle=cycle, total_classes=5, total_amount=Decimal('1000.00'), status='pending',
+        )
+        self.factory = APIRequestFactory()
+
+    def test_trainer_cannot_download_an_invoice_pdf(self):
+        request = self.factory.get(f'/api/client-invoices/{self.invoice.id}/pdf/')
+        force_authenticate(request, user=self.trainer.user)
+        response = ClientInvoiceViewSet.as_view({'get': 'pdf'})(request, pk=self.invoice.id)
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_download_an_invoice_pdf(self):
+        request = self.factory.get(f'/api/client-invoices/{self.invoice.id}/pdf/')
+        force_authenticate(request, user=self.admin)
+        response = ClientInvoiceViewSet.as_view({'get': 'pdf'})(request, pk=self.invoice.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
 
 
 class BillingCycleCloseTests(APITestCase):
