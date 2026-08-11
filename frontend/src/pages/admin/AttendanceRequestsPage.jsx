@@ -79,6 +79,7 @@ export default function AttendanceRequestsPage() {
               <th className="table-head-cell">Student</th>
               <th className="table-head-cell">Course</th>
               <th className="table-head-cell">Topic</th>
+              <th className="table-head-cell">Reason</th>
               <th className="table-head-cell">Requested</th>
               <th className="table-head-cell"></th>
             </tr>
@@ -91,6 +92,9 @@ export default function AttendanceRequestsPage() {
                 <td className="table-cell">{r.student_name}</td>
                 <td className="table-cell">{r.course_name}</td>
                 <td className="table-cell text-text-secondary">{r.topic_covered || '—'}</td>
+                <td className="table-cell text-text-secondary">
+                  {r.request_type === 'duplicate_day' ? 'Second class same day' : 'Late entry'}
+                </td>
                 <td className="table-cell text-text-secondary">{formatDateTime(r.created_at)}</td>
                 <td className="table-cell whitespace-nowrap text-right space-x-3">
                   <button
@@ -111,7 +115,7 @@ export default function AttendanceRequestsPage() {
               </tr>
             ))}
             {filteredPending.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-text-tertiary">
                 {pending.length === 0 ? 'No pending requests.' : 'No pending requests match your search.'}
               </td></tr>
             )}
@@ -129,6 +133,7 @@ export default function AttendanceRequestsPage() {
               <th className="table-head-cell">Student</th>
               <th className="table-head-cell">Course</th>
               <th className="table-head-cell">Topic</th>
+              <th className="table-head-cell">Reason</th>
               <th className="table-head-cell">Status</th>
             </tr>
           </thead>
@@ -140,11 +145,14 @@ export default function AttendanceRequestsPage() {
                 <td className="table-cell">{r.student_name}</td>
                 <td className="table-cell">{r.course_name}</td>
                 <td className="table-cell text-text-secondary">{r.topic_covered || '—'}</td>
+                <td className="table-cell text-text-secondary">
+                  {r.request_type === 'duplicate_day' ? 'Second class same day' : 'Late entry'}
+                </td>
                 <td className="table-cell"><Badge status={r.status} /></td>
               </tr>
             ))}
             {reviewed.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-text-tertiary">No reviewed requests yet.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">No reviewed requests yet.</td></tr>
             )}
           </tbody>
         </table>

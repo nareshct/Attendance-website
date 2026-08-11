@@ -113,46 +113,76 @@ class AttendanceViewSet(ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         user = request.user
-        if not user.is_staff and _is_closed(serializer.validated_data['date']):
-            # Without this check, a double-submit (or resubmitting after the tab was left
-            # open) would create a second pending request for the same class. Both would
-            # look approvable independently, but Attendance has a UniqueConstraint on
-            # (enrollment, date) — approving whichever one comes second would crash with
-            # an IntegrityError instead of a normal validation error. See approve() below
-            # for the matching guard on the other side of the same race.
-            existing_request = AttendanceRequest.objects.filter(
-                enrollment=serializer.validated_data['enrollment'],
-                date=serializer.validated_data['date'],
-                status='pending',
-            ).first()
-            if existing_request is not None:
+        enrollment = serializer.validated_data['enrollment']
+        attendance_date = serializer.validated_data['date']
+        # Not a model field — pop it before any serializer.save() call below, or
+        # Attendance.objects.create() would choke on an unexpected kwarg.
+        confirm_duplicate = serializer.validated_data.pop('confirm_duplicate', False)
+
+        if not user.is_staff:
+            existing_count = Attendance.objects.filter(enrollment=enrollment, date=attendance_date).count()
+
+            if existing_count >= 2:
                 return Response(
-                    {
-                        'pending_approval': True,
-                        'detail': 'A request for this date is already pending admin approval.',
-                        'request': AttendanceRequestSerializer(existing_request).data,
-                    },
-                    status=status.HTTP_202_ACCEPTED,
+                    {'detail': 'This student already has two classes recorded for this date — no further entries are allowed.'},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            req = AttendanceRequest.objects.create(
-                enrollment=serializer.validated_data['enrollment'],
-                date=serializer.validated_data['date'],
-                topic_covered=serializer.validated_data.get('topic_covered', ''),
-                requested_by=user.trainer,
-            )
-            return Response(
-                {
-                    'pending_approval': True,
-                    'detail': 'This date falls in a closed billing cycle. Your request has been sent to admin for approval.',
-                    'request': AttendanceRequestSerializer(req).data,
-                },
-                status=status.HTTP_202_ACCEPTED,
-            )
+            if existing_count == 1:
+                if not confirm_duplicate:
+                    # A plain resubmit (double-click, stale tab) stays a hard block —
+                    # only an explicit confirm from the trainer turns this into an
+                    # admin-approval request, so the request queue doesn't fill up
+                    # with ordinary mistakes. See MarkAttendancePage.jsx.
+                    return Response(
+                        {
+                            'duplicate_confirm_required': True,
+                            'detail': 'Attendance for this class on this date has already been marked. '
+                                      'If this is genuinely a second class today, confirm to send it to admin for approval.',
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                return self._request_approval(
+                    enrollment, attendance_date, serializer.validated_data.get('topic_covered', ''), user.trainer,
+                    request_type='duplicate_day',
+                    pending_detail='A request for a second class on this date is already pending admin approval.',
+                    new_detail='This is a second class for this student today — a request has been sent to admin for approval.',
+                )
+
+            if _is_closed(attendance_date):
+                return self._request_approval(
+                    enrollment, attendance_date, serializer.validated_data.get('topic_covered', ''), user.trainer,
+                    request_type='late_entry',
+                    pending_detail='A request for this date is already pending admin approval.',
+                    new_detail='This date falls in a closed billing cycle. Your request has been sent to admin for approval.',
+                )
 
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def _request_approval(self, enrollment, attendance_date, topic_covered, trainer, *, request_type, pending_detail, new_detail):
+        # Without this check, a double-submit (or resubmitting after the tab was left
+        # open) would create a second pending request for the same class. Both would
+        # look approvable independently — see approve()'s matching guard on the other
+        # side of the same race.
+        existing_request = AttendanceRequest.objects.filter(
+            enrollment=enrollment, date=attendance_date, status='pending', request_type=request_type,
+        ).first()
+        if existing_request is not None:
+            return Response(
+                {'pending_approval': True, 'detail': pending_detail, 'request': AttendanceRequestSerializer(existing_request).data},
+                status=status.HTTP_202_ACCEPTED,
+            )
+
+        req = AttendanceRequest.objects.create(
+            enrollment=enrollment, date=attendance_date, topic_covered=topic_covered,
+            requested_by=trainer, request_type=request_type,
+        )
+        return Response(
+            {'pending_approval': True, 'detail': new_detail, 'request': AttendanceRequestSerializer(req).data},
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     @transaction.atomic
     def perform_create(self, serializer):
@@ -255,9 +285,13 @@ class AttendanceRequestViewSet(ReadOnlyModelViewSet):
         # Belt-and-suspenders alongside the dedupe check in AttendanceViewSet.create():
         # a second pending request for the same (enrollment, date) can still exist from
         # before that check was added, or if the class got marked normally in the
-        # meantime. Catch it here as a normal validation error instead of letting
-        # Attendance's UniqueConstraint turn it into an unhandled IntegrityError/500.
-        if Attendance.objects.filter(enrollment=req.enrollment, date=req.date).exists():
+        # meantime. A 'duplicate_day' request expects to find exactly one existing row
+        # (the first class it's adding a second one alongside) — anything past the
+        # 2-per-day cap, or any existing row at all for a 'late_entry' request, means
+        # this request is stale and should be denied instead of approved.
+        existing_count = Attendance.objects.filter(enrollment=req.enrollment, date=req.date).count()
+        max_before_approval = 1 if req.request_type == 'duplicate_day' else 0
+        if existing_count > max_before_approval:
             return Response(
                 {'detail': 'A class is already recorded for this enrollment and date. Deny this request instead.'},
                 status=status.HTTP_400_BAD_REQUEST,

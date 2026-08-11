@@ -14,13 +14,18 @@ class AttendanceSerializer(serializers.ModelSerializer):
     approved_via_request = serializers.SerializerMethodField()
     topic_covered = serializers.CharField(required=True, allow_blank=False)
     trainer_rate = serializers.SerializerMethodField()
+    # Not a model field — a trainer opts into this explicitly (after seeing the
+    # "already marked" response) to say "yes, this is really a second class
+    # today", so the view routes it to admin approval instead of a flat 409.
+    # See AttendanceViewSet.create().
+    confirm_duplicate = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = Attendance
         fields = [
             'id', 'enrollment', 'student_name', 'course_name', 'date', 'status',
             'topic_covered', 'marked_by', 'marked_by_name', 'in_closed_cycle', 'approved_via_request',
-            'trainer_rate',
+            'trainer_rate', 'confirm_duplicate',
         ]
         read_only_fields = ['marked_by']
 
@@ -94,16 +99,17 @@ class AttendanceSerializer(serializers.ModelSerializer):
             if not is_owner and not is_covering:
                 raise serializers.ValidationError('You can only mark attendance for your own students.')
 
-        # A class only happens once — block a duplicate row for the same
-        # enrollment+date (double-click, retry, etc.), on both create and update.
-        enrollment = attrs.get('enrollment', getattr(self.instance, 'enrollment', None))
-        attendance_date = attrs.get('date', getattr(self.instance, 'date', None))
-        if enrollment is not None and attendance_date is not None:
-            qs = Attendance.objects.filter(enrollment=enrollment, date=attendance_date)
-            if self.instance is not None:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError('Attendance for this class on this date has already been marked.')
+        # Editing an existing row onto a date that already has another row is always
+        # blocked outright — there's no approval path for that. Create-time duplicates
+        # are handled differently (a second class in a day can be real), so that's left
+        # to the view instead of being hard-blocked here — see AttendanceViewSet.create().
+        if self.instance is not None:
+            enrollment = attrs.get('enrollment', self.instance.enrollment)
+            attendance_date = attrs.get('date', self.instance.date)
+            if enrollment is not None and attendance_date is not None:
+                qs = Attendance.objects.filter(enrollment=enrollment, date=attendance_date).exclude(pk=self.instance.pk)
+                if qs.exists():
+                    raise serializers.ValidationError('Attendance for this class on this date has already been marked.')
         return attrs
 
 
@@ -116,6 +122,6 @@ class AttendanceRequestSerializer(serializers.ModelSerializer):
         model = AttendanceRequest
         fields = [
             'id', 'enrollment', 'student_name', 'course_name', 'date', 'topic_covered',
-            'requested_by', 'trainer_name', 'status', 'created_at', 'reviewed_at',
+            'requested_by', 'trainer_name', 'request_type', 'status', 'created_at', 'reviewed_at',
         ]
         read_only_fields = ['requested_by', 'status', 'created_at', 'reviewed_at']

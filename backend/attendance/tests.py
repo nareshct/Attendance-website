@@ -99,9 +99,10 @@ class WithdrawnEnrollmentBlocksAttendanceTests(APITestCase):
 
 
 class DuplicateAndOverCompletionGuardTests(APITestCase):
-    """A class only happens once (no duplicate enrollment+date row), and a
-    completed enrollment can't take further classes past its course length —
-    see AttendanceSerializer.validate()/validate_enrollment().
+    """A completed enrollment can't take further classes past its course
+    length — see AttendanceSerializer.validate_enrollment(). Create-time
+    same-day duplicate handling now lives in the view (see
+    SecondClassSameDayTests below), not the serializer.
     """
 
     def setUp(self):
@@ -119,17 +120,6 @@ class DuplicateAndOverCompletionGuardTests(APITestCase):
 
         data = {'enrollment': enrollment.id, 'date': date, 'topic_covered': 'x', 'status': 'present', **overrides}
         return AttendanceSerializer(data=data, context={'request': self.FakeRequest()})
-
-    def test_duplicate_attendance_same_enrollment_and_date_is_rejected(self):
-        enrollment = Enrollment.objects.create(
-            student=self.student, course=self.course, trainer=self.trainer,
-            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
-        )
-        Attendance.objects.create(enrollment=enrollment, date=datetime.date(2026, 1, 5), status='present', marked_by=self.trainer)
-
-        serializer = self._serializer(enrollment, '2026-01-05')
-        self.assertFalse(serializer.is_valid())
-        self.assertIn('non_field_errors', serializer.errors)
 
     def test_different_date_for_same_enrollment_is_allowed(self):
         enrollment = Enrollment.objects.create(
@@ -260,9 +250,9 @@ class CrossTrainerEditBlockedTests(APITestCase):
 
 class DuplicatePendingAttendanceRequestTests(APITestCase):
     """Two pending AttendanceRequests for the same (enrollment, date) must never
-    both reach approve() — Attendance has a UniqueConstraint on that pair, so
-    the second approval would otherwise crash with an unhandled IntegrityError
-    instead of a normal 400. See AttendanceViewSet.create()'s dedupe check and
+    both reach approve() — a late_entry request expects zero existing Attendance
+    rows for that pair, so the second approval would otherwise slip past the max-
+    count guard. See AttendanceViewSet.create()'s dedupe check and
     AttendanceRequestViewSet.approve()'s guard.
     """
 
@@ -313,6 +303,83 @@ class DuplicatePendingAttendanceRequestTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         req.refresh_from_db()
         self.assertEqual(req.status, 'pending')
+
+
+class SecondClassSameDayTests(APITestCase):
+    """A trainer can genuinely teach a student twice in one day. The first class
+    marks directly as normal; a second attempt for the same (enrollment, date)
+    is blocked with 409 unless the trainer explicitly confirms it, at which
+    point it becomes an admin-approval request instead of a flat rejection. A
+    third attempt is never allowed, approved or not. See AttendanceViewSet.
+    create()/AttendanceRequestViewSet.approve().
+    """
+
+    def setUp(self):
+        self.trainer = _make_trainer('trainer_dup_day', Decimal('100'))
+        self.admin = _make_user('admin_dup_day', is_staff=True)
+        course = Course.objects.create(name='Dup Day Course', total_classes=24, rate_per_class=Decimal('300'))
+        student = Student.objects.create(name='Dup Day Kid', grade='5', source_type='B2C')
+        self.enrollment = Enrollment.objects.create(
+            student=student, course=course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        self.factory = APIRequestFactory()
+
+    def _mark(self, confirm_duplicate=False):
+        data = {
+            'enrollment': self.enrollment.id, 'date': '2026-01-05', 'topic_covered': 'x', 'status': 'present',
+            'confirm_duplicate': confirm_duplicate,
+        }
+        request = self.factory.post('/api/attendance/', data, format='json')
+        force_authenticate(request, user=self.trainer.user)
+        return AttendanceViewSet.as_view({'post': 'create'})(request)
+
+    def test_second_attempt_without_confirm_returns_409(self):
+        first = self._mark()
+        self.assertEqual(first.status_code, 201)
+
+        second = self._mark()
+        self.assertEqual(second.status_code, 409)
+        self.assertTrue(second.data['duplicate_confirm_required'])
+        self.assertEqual(Attendance.objects.filter(enrollment=self.enrollment, date=datetime.date(2026, 1, 5)).count(), 1)
+
+    def test_second_attempt_with_confirm_creates_a_pending_request(self):
+        self._mark()
+        response = self._mark(confirm_duplicate=True)
+
+        self.assertEqual(response.status_code, 202)
+        req = AttendanceRequest.objects.get(enrollment=self.enrollment, date=datetime.date(2026, 1, 5))
+        self.assertEqual(req.request_type, 'duplicate_day')
+        self.assertEqual(req.status, 'pending')
+
+    def test_admin_approving_creates_the_second_class_and_pays_it(self):
+        self._mark()
+        self._mark(confirm_duplicate=True)
+        req = AttendanceRequest.objects.get(enrollment=self.enrollment, date=datetime.date(2026, 1, 5))
+
+        self.enrollment.refresh_from_db()
+        classes_before = self.enrollment.classes_completed
+
+        request = self.factory.post(f'/api/attendance-requests/{req.id}/approve/')
+        force_authenticate(request, user=self.admin)
+        response = AttendanceRequestViewSet.as_view({'post': 'approve'})(request, pk=req.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Attendance.objects.filter(enrollment=self.enrollment, date=datetime.date(2026, 1, 5)).count(), 2)
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.classes_completed, classes_before + 1)
+
+    def test_third_attempt_is_hard_blocked_even_with_confirm(self):
+        self._mark()
+        self._mark(confirm_duplicate=True)
+        req = AttendanceRequest.objects.get(enrollment=self.enrollment, date=datetime.date(2026, 1, 5))
+        request = self.factory.post(f'/api/attendance-requests/{req.id}/approve/')
+        force_authenticate(request, user=self.admin)
+        AttendanceRequestViewSet.as_view({'post': 'approve'})(request, pk=req.id)
+
+        third = self._mark(confirm_duplicate=True)
+        self.assertEqual(third.status_code, 400)
+        self.assertEqual(Attendance.objects.filter(enrollment=self.enrollment, date=datetime.date(2026, 1, 5)).count(), 2)
 
 
 class SubstituteTrainerHistoryAccessTests(APITestCase):

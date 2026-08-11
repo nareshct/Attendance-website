@@ -45,6 +45,10 @@ export default function MarkAttendancePage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Set when the backend blocks a create with 409 (a class is already marked for this
+  // student/date) — offers the trainer a way to say "this is genuinely a second class
+  // today" instead of just being stuck. See AttendanceViewSet.create().
+  const [duplicateConfirmPending, setDuplicateConfirmPending] = useState(false)
 
   const [editingId, setEditingId] = useState(null)
   const [editDate, setEditDate] = useState('')
@@ -87,27 +91,18 @@ export default function MarkAttendancePage() {
     loadRequests().catch((err) => setError(err.message))
   }, [api, loadHistory, loadRequests])
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    // Mirrors AttendanceSerializer.validate()'s duplicate check — only sees this
-    // trainer's own visible history, so a class already marked by someone else
-    // covering the same enrollment still falls through to the backend's own check.
-    const alreadyMarked = history.some((h) => String(h.enrollment) === String(form.enrollment) && h.date === form.date)
-    if (alreadyMarked) {
-      setError('Attendance for this class on this date has already been marked.')
-      return
-    }
-
+  async function submitAttendance(confirmDuplicate) {
     setSubmitting(true)
     setError('')
     setSuccess('')
     try {
       const result = await api('/api/attendance/', {
         method: 'POST',
-        body: { ...form, enrollment: Number(form.enrollment), status: 'present' },
+        body: { ...form, enrollment: Number(form.enrollment), status: 'present', confirm_duplicate: confirmDuplicate },
       })
+      setDuplicateConfirmPending(false)
       if (result && result.pending_approval) {
-        setSuccess('This date falls in a closed billing cycle — a request has been sent to admin for approval.')
+        setSuccess(result.detail)
         await loadRequests()
       } else {
         setSuccess('Class marked as taken.')
@@ -115,10 +110,24 @@ export default function MarkAttendancePage() {
       }
       setForm({ enrollment: '', date: today(), topic_covered: '' })
     } catch (err) {
+      if (err.status === 409) {
+        setDuplicateConfirmPending(true)
+      } else {
+        setDuplicateConfirmPending(false)
+      }
       setError(err.message)
     } finally {
       setSubmitting(false)
     }
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault()
+    submitAttendance(false)
+  }
+
+  function confirmSecondClass() {
+    submitAttendance(true)
   }
 
   function openEdit(h) {
@@ -187,14 +196,20 @@ export default function MarkAttendancePage() {
             required
             placeholder="Search student…"
             value={form.enrollment}
-            onChange={(v) => setForm({ ...form, enrollment: v })}
+            onChange={(v) => { setForm({ ...form, enrollment: v }); setDuplicateConfirmPending(false) }}
             options={enrollments.map((en) => ({
               value: en.id,
               label: `${en.student_name} — ${en.course_name} (Batch ${en.batch_number})${en.covering_for ? ` · Covering for ${en.covering_for}` : ''}`,
             }))}
           />
 
-          <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="input" />
+          <input
+            required
+            type="date"
+            value={form.date}
+            onChange={(e) => { setForm({ ...form, date: e.target.value }); setDuplicateConfirmPending(false) }}
+            className="input"
+          />
 
           <p className="text-xs text-text-secondary">
             Only mark a class if you actually taught it. If a student didn't attend, just don't mark that date — there's no separate "absent" entry to make.
@@ -212,9 +227,20 @@ export default function MarkAttendancePage() {
           {error && <p className="text-error text-sm">{error}</p>}
           {success && <p className="text-success text-sm">{success}</p>}
 
-          <Button type="submit" size="lg" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Mark class taken'}
-          </Button>
+          {duplicateConfirmPending ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" variant="ghost" size="lg" disabled={submitting} onClick={confirmSecondClass}>
+                {submitting ? 'Sending…' : 'Yes, this is a genuine second class — send to admin'}
+              </Button>
+              <Button type="submit" size="lg" disabled={submitting}>
+                {submitting ? 'Saving…' : 'Mark class taken'}
+              </Button>
+            </div>
+          ) : (
+            <Button type="submit" size="lg" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Mark class taken'}
+            </Button>
+          )}
         </form>
       </Card>
 
@@ -229,6 +255,7 @@ export default function MarkAttendancePage() {
                   <th className="table-head-cell">Student</th>
                   <th className="table-head-cell">Course</th>
                   <th className="table-head-cell">Topic</th>
+                  <th className="table-head-cell">Reason</th>
                   <th className="table-head-cell">Status</th>
                 </tr>
               </thead>
@@ -239,6 +266,9 @@ export default function MarkAttendancePage() {
                     <td className="table-cell">{r.student_name}</td>
                     <td className="table-cell">{r.course_name}</td>
                     <td className="table-cell text-text-secondary">{r.topic_covered || '—'}</td>
+                    <td className="table-cell text-text-secondary">
+                      {r.request_type === 'duplicate_day' ? 'Second class same day' : 'Late entry'}
+                    </td>
                     <td className="table-cell"><Badge status={r.status} /></td>
                   </tr>
                 ))}
