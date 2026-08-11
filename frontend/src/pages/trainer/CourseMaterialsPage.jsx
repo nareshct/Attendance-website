@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { downloadFile } from '../../api/client'
 import { Card } from '../../components/Card'
 import { SearchableSelect } from '../../components/SearchableSelect'
@@ -9,6 +9,17 @@ import { formatDate } from '../../utils/date'
 
 function loadCourseFilterOptions(pickerSearch, query) {
   return pickerSearch.courses(query).then((cs) => (query ? cs : [{ value: '', label: 'All courses' }, ...cs]))
+}
+
+// One section per course, each listing that course's own files — replaces a flat
+// table that repeated the course name on every row.
+function groupByCourse(materials) {
+  const map = new Map()
+  for (const m of materials) {
+    if (!map.has(m.course)) map.set(m.course, { course: m.course, course_name: m.course_name, items: [] })
+    map.get(m.course).items.push(m)
+  }
+  return Array.from(map.values()).sort((a, b) => a.course_name.localeCompare(b.course_name))
 }
 
 export default function CourseMaterialsPage() {
@@ -39,6 +50,8 @@ export default function CourseMaterialsPage() {
     }
   }
 
+  const groups = useMemo(() => groupByCourse(materials), [materials])
+
   return (
     <div>
       <h1 className="text-2xl font-semibold text-navy mb-6">Course Materials</h1>
@@ -54,41 +67,45 @@ export default function CourseMaterialsPage() {
         />
       </div>
 
-      <Card className="p-0 overflow-x-auto">
-        <table className="table">
-          <thead className="table-head-row">
-            <tr>
-              <th className="table-head-cell">Course</th>
-              <th className="table-head-cell">Title</th>
-              <th className="table-head-cell">Description</th>
-              <th className="table-head-cell">Uploaded</th>
-              <th className="table-head-cell"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {materials.map((m) => (
-              <tr key={m.id} className="table-row">
-                <td className="table-cell">{m.course_name}</td>
-                <td className="table-cell">{m.title}</td>
-                <td className="table-cell text-gray-500 max-w-xs truncate">{m.description}</td>
-                <td className="table-cell">{formatDate(m.uploaded_at)}</td>
-                <td className="table-cell text-right">
-                  <button
-                    disabled={busy === m.id}
-                    onClick={() => handleDownload(m.id)}
-                    className="text-brand-violet hover:underline disabled:opacity-60 focus-ring"
-                  >
-                    {busy === m.id ? 'Downloading…' : 'Download'}
-                  </button>
-                </td>
+      {groups.map((g) => (
+        <Card key={g.course} className="p-0 overflow-x-auto mb-4">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="font-semibold text-navy">{g.course_name}</h2>
+            <span className="text-xs text-text-tertiary">{g.items.length} file{g.items.length !== 1 ? 's' : ''}</span>
+          </div>
+          <table className="table">
+            <thead className="table-head-row">
+              <tr>
+                <th className="table-head-cell">Title</th>
+                <th className="table-head-cell">Description</th>
+                <th className="table-head-cell">Uploaded</th>
+                <th className="table-head-cell"></th>
               </tr>
-            ))}
-            {materials.length === 0 && (
-              <tr><td colSpan={5} className="table-cell text-center text-gray-400">No course materials yet.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
+            </thead>
+            <tbody>
+              {g.items.map((m) => (
+                <tr key={m.id} className="table-row">
+                  <td className="table-cell">{m.title}</td>
+                  <td className="table-cell text-gray-500 max-w-xs truncate">{m.description}</td>
+                  <td className="table-cell">{formatDate(m.uploaded_at)}</td>
+                  <td className="table-cell text-right">
+                    <button
+                      disabled={busy === m.id}
+                      onClick={() => handleDownload(m.id)}
+                      className="text-brand-violet hover:underline disabled:opacity-60 focus-ring"
+                    >
+                      {busy === m.id ? 'Downloading…' : 'Download'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      ))}
+      {groups.length === 0 && (
+        <Card className="text-center text-gray-400 py-6">No course materials yet.</Card>
+      )}
     </div>
   )
 }
