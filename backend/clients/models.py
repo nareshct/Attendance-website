@@ -1,7 +1,18 @@
-from django.core.validators import MinValueValidator
+from django.core.exceptions import ValidationError
+from django.core.validators import FileExtensionValidator, MinValueValidator
 from django.db import models
 
 from courses.models import Course
+
+# A logo is a small brand asset, not a document — cap well below
+# courses.models.MAX_COURSE_MATERIAL_SIZE so a mis-selected large photo
+# doesn't quietly bloat storage.
+MAX_LOGO_SIZE = 2 * 1024 * 1024
+
+
+def validate_logo_size(file):
+    if file.size > MAX_LOGO_SIZE:
+        raise ValidationError(f'Logo must be under {MAX_LOGO_SIZE // (1024 * 1024)}MB.')
 
 
 class Client(models.Model):
@@ -20,6 +31,15 @@ class Client(models.Model):
         help_text='Amount this client pays us per class attended by their students.',
     )
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='active')
+    # Both purely cosmetic — shown on this client's B2B students' progress
+    # reports/certificates (see enrollments/report_pdf.py's and
+    # certificate_pdf.py's _display_name, and the batches equivalents) so the
+    # PDF reads as the client's own branded document rather than ours.
+    logo = models.ImageField(
+        upload_to='client_logos/', blank=True, null=True,
+        validators=[FileExtensionValidator(allowed_extensions=['png', 'jpg', 'jpeg', 'webp']), validate_logo_size],
+    )
+    tagline = models.CharField(max_length=255, blank=True, default='', help_text='e.g. "Excellence in Coding Education".')
 
     def save(self, *args, **kwargs):
         if self.pk:

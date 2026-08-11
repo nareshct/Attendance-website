@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { apiUpload } from '../../api/client'
 import { ArchiveClientModal } from '../../components/ArchiveClientModal'
 import { Button } from '../../components/Button'
 import { Card, StatCard } from '../../components/Card'
 import { Modal } from '../../components/Modal'
+import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { usePaginatedList } from '../../hooks/usePaginatedList'
 
-const EMPTY_FORM = { company_name: '', contact_phone: '', contact_email: '', rate_per_class: '' }
+const EMPTY_FORM = { company_name: '', contact_phone: '', contact_email: '', rate_per_class: '', tagline: '' }
 
 export default function ClientsPage() {
   const api = useApi()
+  const { auth } = useAuth()
   const [summary, setSummary] = useState(null)
   const [search, setSearch] = useState('')
   const [statusTab, setStatusTab] = useState('active')
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [logoFile, setLogoFile] = useState(null)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -41,8 +45,12 @@ export default function ClientsPage() {
     setSubmitting(true)
     setError('')
     try {
-      await api('/api/clients/', { method: 'POST', body: form })
+      const data = new FormData()
+      Object.entries(form).forEach(([key, value]) => data.append(key, value))
+      if (logoFile) data.append('logo', logoFile)
+      await apiUpload('/api/clients/', data, auth.token)
       setForm(EMPTY_FORM)
+      setLogoFile(null)
       setShowForm(false)
       await loadClients()
       await loadSummary()
@@ -98,6 +106,11 @@ export default function ClientsPage() {
           <input required placeholder="Contact phone" value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} className="input" />
           <input placeholder="Contact email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} className="input" />
           <input required type="number" step="0.01" min="0" placeholder="Rate per class (₹)" value={form.rate_per_class} onChange={(e) => setForm({ ...form, rate_per_class: e.target.value })} className="input" />
+          <input placeholder="Tagline (optional)" value={form.tagline} onChange={(e) => setForm({ ...form, tagline: e.target.value })} className="input sm:col-span-2" />
+          <div>
+            <label className="block text-xs text-text-secondary mb-1">Logo (optional)</label>
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setLogoFile(e.target.files[0] || null)} className="input" />
+          </div>
           {error && <p className="sm:col-span-3 text-error text-xs">{error}</p>}
           <div className="sm:col-span-3 flex justify-end gap-3">
             <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>

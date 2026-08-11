@@ -1,8 +1,12 @@
+import io
 from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from PIL import Image as PILImage
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
 from attendance.models import Attendance
@@ -13,9 +17,15 @@ from enrollments.models import Enrollment
 from students.models import Student
 from trainers.models import Trainer
 
-from .models import Client
+from .models import Client, validate_logo_size
 from .serializers import ClientSerializer
 from .views import ClientViewSet
+
+
+def _tiny_png(name='logo.png'):
+    buf = io.BytesIO()
+    PILImage.new('RGB', (10, 10), color=(37, 99, 235)).save(buf, format='PNG')
+    return SimpleUploadedFile(name, buf.getvalue(), content_type='image/png')
 
 
 class ClientHardDeleteBlockedTests(APITestCase):
@@ -41,6 +51,59 @@ class ClientRateValidationTests(APITestCase):
         serializer = ClientSerializer(data={'company_name': 'Bad Co', 'contact_phone': '123', 'rate_per_class': '-500.00'})
         self.assertFalse(serializer.is_valid())
         self.assertIn('rate_per_class', serializer.errors)
+
+
+class ClientLogoTaglineTests(APITestCase):
+    """logo/tagline are purely cosmetic branding shown on a B2B client's
+    students' PDFs (see enrollments/report_pdf.py's and certificate_pdf.py's
+    _branding_client/_logo_flowable, and the batches equivalents) — this just
+    covers that they're actually settable/servable through the API."""
+
+    def _create(self, admin, **extra):
+        factory = APIRequestFactory()
+        data = {'company_name': 'Logo Co', 'contact_phone': '123', 'rate_per_class': '200', **extra}
+        request = factory.post('/api/clients/', data=data, format='multipart')
+        force_authenticate(request, user=admin)
+        return ClientViewSet.as_view({'post': 'create'})(request)
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_logo', password='x', is_staff=True)
+
+    def test_can_create_a_client_with_a_logo_and_tagline(self):
+        response = self._create(self.admin, logo=_tiny_png(), tagline='Excellence in Coding Education')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data['logo'])
+        self.assertEqual(response.data['tagline'], 'Excellence in Coding Education')
+
+    def test_logo_and_tagline_are_optional(self):
+        response = self._create(self.admin)
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertFalse(response.data['logo'])
+        self.assertEqual(response.data['tagline'], '')
+
+    def test_can_update_tagline_and_logo_via_multipart_patch(self):
+        client_obj = Client.objects.create(company_name='Patch Co', contact_phone='123', rate_per_class=Decimal('200'))
+        factory = APIRequestFactory()
+        request = factory.patch(
+            f'/api/clients/{client_obj.id}/',
+            data={'tagline': 'New Tagline', 'logo': _tiny_png()}, format='multipart',
+        )
+        force_authenticate(request, user=self.admin)
+        response = ClientViewSet.as_view({'patch': 'partial_update'})(request, pk=client_obj.id)
+        self.assertEqual(response.status_code, 200, response.data)
+        client_obj.refresh_from_db()
+        self.assertEqual(client_obj.tagline, 'New Tagline')
+        self.assertTrue(client_obj.logo)
+
+    def test_non_image_file_is_rejected(self):
+        response = self._create(self.admin, logo=SimpleUploadedFile('not-a-logo.txt', b'hello', content_type='text/plain'))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('logo', response.data)
+
+    def test_oversized_logo_is_rejected(self):
+        oversized = type('F', (), {'size': 3 * 1024 * 1024})()
+        with self.assertRaises(ValidationError):
+            validate_logo_size(oversized)
 
 
 class ClientSummaryIncludesArchivedClientsTests(APITestCase):

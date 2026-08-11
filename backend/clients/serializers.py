@@ -33,7 +33,7 @@ class ClientSerializer(serializers.ModelSerializer):
         model = Client
         fields = [
             'id', 'company_name', 'contact_phone', 'contact_email', 'rate_per_class',
-            'status', 'course_rates', 'contacts', 'pending_amount',
+            'status', 'logo', 'tagline', 'course_rates', 'contacts', 'pending_amount',
             'active_student_count', 'overdue_invoice_count',
         ]
         read_only_fields = ['status']

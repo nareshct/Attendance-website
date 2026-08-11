@@ -88,11 +88,11 @@ export async function downloadFile(path, token) {
   window.URL.revokeObjectURL(url)
 }
 
-export async function apiUpload(path, formData, token) {
+export async function apiUpload(path, formData, token, method = 'POST') {
   const headers = {}
   if (token) headers.Authorization = `Token ${token}`
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { method: 'POST', headers, body: formData })
+  const response = await fetch(`${API_BASE_URL}${path}`, { method, headers, body: formData })
 
   if (!response.ok) {
     let detail = response.statusText

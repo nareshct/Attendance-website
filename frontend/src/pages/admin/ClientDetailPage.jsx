@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { downloadFile } from '../../api/client'
+import { apiUpload, downloadFile } from '../../api/client'
 import { ActiveStudentsModal } from '../../components/ActiveStudentsModal'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
@@ -32,6 +32,7 @@ export default function ClientDetailPage() {
 
   const [editingProfile, setEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState(null)
+  const [logoFile, setLogoFile] = useState(null)
   const [profileError, setProfileError] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
 
@@ -212,7 +213,9 @@ export default function ClientDetailPage() {
       contact_phone: client.contact_phone,
       contact_email: client.contact_email,
       rate_per_class: client.rate_per_class ?? '',
+      tagline: client.tagline ?? '',
     })
+    setLogoFile(null)
     setProfileError('')
     setContactError('')
     setRateError('')
@@ -222,6 +225,7 @@ export default function ClientDetailPage() {
   function closeEditProfile() {
     setEditingProfile(false)
     setProfileForm(null)
+    setLogoFile(null)
     setProfileError('')
     setShowContactForm(false)
     setContactForm(EMPTY_CONTACT)
@@ -238,7 +242,10 @@ export default function ClientDetailPage() {
     setSavingProfile(true)
     setProfileError('')
     try {
-      await api(`/api/clients/${id}/`, { method: 'PATCH', body: profileForm })
+      const data = new FormData()
+      Object.entries(profileForm).forEach(([key, value]) => data.append(key, value))
+      if (logoFile) data.append('logo', logoFile)
+      await apiUpload(`/api/clients/${id}/`, data, auth.token, 'PATCH')
       closeEditProfile()
       await loadClient()
       await loadCurrentCycle()
@@ -261,7 +268,13 @@ export default function ClientDetailPage() {
       <Link to="/admin/clients" className="text-sm font-medium text-primary hover:underline focus-ring">&larr; Back to clients</Link>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mt-3 mb-6">
-        <h1 className="text-2xl font-semibold text-navy">{client.company_name}</h1>
+        <div className="flex items-center gap-3">
+          {client.logo && <img src={client.logo} alt="" className="w-10 h-10 rounded-lg object-contain bg-white border border-gray-200" />}
+          <div>
+            <h1 className="text-2xl font-semibold text-navy">{client.company_name}</h1>
+            {client.tagline && <p className="text-xs text-text-secondary">{client.tagline}</p>}
+          </div>
+        </div>
         {!editingProfile && <Button variant="success" onClick={openEditProfile}>Edit details</Button>}
       </div>
 
@@ -334,6 +347,17 @@ export default function ClientDetailPage() {
           <div>
             <label className="block text-xs text-text-secondary mb-1">Rate per class (₹)</label>
             <input required type="number" step="0.01" min="0" value={profileForm?.rate_per_class ?? ''} onChange={(e) => setProfileForm({ ...profileForm, rate_per_class: e.target.value })} className="input" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-xs text-text-secondary mb-1">Tagline</label>
+            <input placeholder="e.g. Excellence in Coding Education" value={profileForm?.tagline ?? ''} onChange={(e) => setProfileForm({ ...profileForm, tagline: e.target.value })} className="input" />
+          </div>
+          <div>
+            <label className="block text-xs text-text-secondary mb-1">Logo</label>
+            <div className="flex items-center gap-2">
+              {client.logo && !logoFile && <img src={client.logo} alt="" className="w-9 h-9 rounded-lg object-contain bg-white border border-gray-200" />}
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setLogoFile(e.target.files[0] || null)} className="input" />
+            </div>
           </div>
           {profileError && <p className="sm:col-span-3 text-error text-xs">{profileError}</p>}
           <div className="sm:col-span-3 flex justify-end gap-3">
