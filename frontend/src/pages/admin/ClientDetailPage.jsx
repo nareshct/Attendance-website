@@ -567,12 +567,12 @@ export default function ClientDetailPage() {
           />
           <div className="flex justify-end gap-6 mt-3 text-sm">
             <div className="text-right">
-              <div className="text-xs text-text-secondary">Total class count</div>
-              <div className="font-semibold text-navy tabular-nums">{history.reduce((sum, h) => sum + Number(h.total_classes), 0)}</div>
+              <div className="text-xs text-text-secondary">Total class count (all-time)</div>
+              <div className="font-semibold text-navy tabular-nums">{currentCycle ? currentCycle.total_classes : '…'}</div>
             </div>
             <div className="text-right">
-              <div className="text-xs text-text-secondary">Total earning</div>
-              <div className="font-semibold text-success tabular-nums">₹{history.reduce((sum, h) => sum + Number(h.our_earning), 0)}</div>
+              <div className="text-xs text-text-secondary">Total earning (all-time)</div>
+              <div className="font-semibold text-success tabular-nums">₹{currentCycle ? currentCycle.total_earning : '…'}</div>
             </div>
           </div>
         </Card>
