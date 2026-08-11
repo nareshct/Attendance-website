@@ -369,7 +369,7 @@ class ParentCertificateView(APIView):
 
         enrollment = Enrollment.objects.filter(
             id=enrollment_id, student=link.student, status='completed'
-        ).select_related('student', 'course', 'trainer').first()
+        ).select_related('student__client', 'course', 'trainer').first()
         if enrollment is None:
             return Response({'detail': 'A certificate is not available for this enrollment.'}, status=404)
 

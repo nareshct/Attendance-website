@@ -25,7 +25,7 @@ from .services import find_schedule_conflict, trainer_payment_gate
 
 
 class EnrollmentViewSet(ModelViewSet):
-    queryset = Enrollment.objects.select_related('student', 'course', 'trainer').order_by('-start_date')
+    queryset = Enrollment.objects.select_related('student__client', 'course', 'trainer').order_by('-start_date')
     serializer_class = EnrollmentSerializer
     permission_classes = [IsAdmin]
     # ?search= matches student name OR course name OR trainer name (case-insensitive
