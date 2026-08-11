@@ -1197,3 +1197,59 @@ class TrainerSelfServiceTests(APITestCase):
         force_authenticate(request, user=self.trainer.user)
         response = BatchPayoutViewSet.as_view({'post': 'create'})(request)
         self.assertEqual(response.status_code, 403)
+
+
+class BatchEnrollmentReportCertificateTests(APITestCase):
+    """report/certificate mirror EnrollmentViewSet.report/.certificate (see
+    enrollments/tests.py) but scoped to a BatchEnrollment: any admin, or a
+    trainer whose name is on the batch, can pull the report; the certificate
+    additionally requires the whole Batch to be 'completed' and the specific
+    BatchEnrollment to still be 'active'."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.admin = get_user_model().objects.create_user(username='cert_admin', password='x', is_staff=True)
+        self.trainer = _make_trainer(username='cert_trainer', name='Priya')
+        self.other_trainer = _make_trainer(username='cert_other_trainer', name='Ravi')
+        self.batch = _make_batch(payment_type='one_time', trainer_names='Priya')
+        self.student = _make_student('Aarav')
+        self.enrollment = BatchEnrollment.objects.create(
+            batch=self.batch, student=self.student, joined_date=datetime.date(2026, 7, 1),
+        )
+
+    def _get(self, action, user):
+        request = self.factory.get(f'/api/batch-enrollments/{self.enrollment.id}/{action}/')
+        force_authenticate(request, user=user)
+        return BatchEnrollmentViewSet.as_view({'get': action})(request, pk=self.enrollment.id)
+
+    def test_admin_can_download_report(self):
+        response = self._get('report', self.admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+
+    def test_owning_trainer_can_download_report(self):
+        response = self._get('report', self.trainer.user)
+        self.assertEqual(response.status_code, 200)
+
+    def test_non_owning_trainer_cannot_download_report(self):
+        response = self._get('report', self.other_trainer.user)
+        self.assertEqual(response.status_code, 403)
+
+    def test_certificate_blocked_while_batch_is_still_ongoing(self):
+        response = self._get('certificate', self.admin)
+        self.assertEqual(response.status_code, 400)
+
+    def test_certificate_blocked_for_a_withdrawn_enrollment_even_if_batch_completed(self):
+        self.batch.status = 'completed'
+        self.batch.save(update_fields=['status'])
+        self.enrollment.status = 'withdrawn'
+        self.enrollment.save(update_fields=['status'])
+        response = self._get('certificate', self.admin)
+        self.assertEqual(response.status_code, 400)
+
+    def test_certificate_available_once_batch_completed_and_enrollment_active(self):
+        self.batch.status = 'completed'
+        self.batch.save(update_fields=['status'])
+        response = self._get('certificate', self.admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')

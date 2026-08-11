@@ -329,6 +329,34 @@ export default function BatchDetailPage() {
     }
   }
 
+  const [downloadingReportId, setDownloadingReportId] = useState(null)
+  const [downloadingCertificateId, setDownloadingCertificateId] = useState(null)
+  const [downloadError, setDownloadError] = useState('')
+
+  async function handleDownloadReport(enrollmentId) {
+    setDownloadingReportId(enrollmentId)
+    setDownloadError('')
+    try {
+      await downloadFile(`/api/batch-enrollments/${enrollmentId}/report/`, auth.token)
+    } catch (err) {
+      setDownloadError(err.message)
+    } finally {
+      setDownloadingReportId(null)
+    }
+  }
+
+  async function handleDownloadCertificate(enrollmentId) {
+    setDownloadingCertificateId(enrollmentId)
+    setDownloadError('')
+    try {
+      await downloadFile(`/api/batch-enrollments/${enrollmentId}/certificate/`, auth.token)
+    } catch (err) {
+      setDownloadError(err.message)
+    } finally {
+      setDownloadingCertificateId(null)
+    }
+  }
+
   const [removeTarget, setRemoveTarget] = useState(null)
 
   async function handleRemoveEnrollment() {
@@ -1120,6 +1148,8 @@ export default function BatchDetailPage() {
         </div>
       )}
 
+      {downloadError && <p className="text-error text-xs mb-3">{downloadError}</p>}
+
       <div className="space-y-3 mb-3">
         {filteredEnrollments.map((e) => (
           <Card key={e.id}>
@@ -1144,6 +1174,22 @@ export default function BatchDetailPage() {
                 <button disabled={busy} onClick={() => openEditLeadInfo(e)} className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring">
                   Edit
                 </button>
+                <button
+                  disabled={downloadingReportId === e.id}
+                  onClick={() => handleDownloadReport(e.id)}
+                  className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
+                >
+                  {downloadingReportId === e.id ? 'Downloading…' : 'Report'}
+                </button>
+                {batch?.status === 'completed' && e.status === 'active' && (
+                  <button
+                    disabled={downloadingCertificateId === e.id}
+                    onClick={() => handleDownloadCertificate(e.id)}
+                    className="text-xs font-medium text-success hover:underline disabled:opacity-60 focus-ring"
+                  >
+                    {downloadingCertificateId === e.id ? 'Downloading…' : 'Certificate'}
+                  </button>
+                )}
                 {e.status === 'active' && (
                   <button disabled={busy} onClick={() => openWithdraw(e)} className="text-xs font-medium text-error hover:underline disabled:opacity-60 focus-ring">
                     Withdraw

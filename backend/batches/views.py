@@ -15,7 +15,9 @@ from rest_framework.viewsets import ModelViewSet
 from audit.services import log_action
 from config.permissions import IsAdmin, IsAdminOrTrainer, IsTrainer
 
+from .certificate_pdf import render_batch_certificate_pdf
 from .models import Batch, BatchEnrollment, BatchInstallment, BatchPayout, BatchSession
+from .report_pdf import render_batch_student_report_pdf
 from .serializers import (
     BatchEnrollmentSerializer,
     BatchInstallmentSerializer,
@@ -194,12 +196,70 @@ class BatchPayoutViewSet(ModelViewSet):
 
 
 class BatchEnrollmentViewSet(ModelViewSet):
-    queryset = BatchEnrollment.objects.select_related('batch', 'student').prefetch_related('installments')
+    queryset = BatchEnrollment.objects.select_related(
+        'batch__course', 'student__client',
+    ).prefetch_related('installments')
     serializer_class = BatchEnrollmentSerializer
     permission_classes = [IsAdmin]
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
     filter_backends = [filters.SearchFilter]
     search_fields = ['student__name']
+
+    def get_permissions(self):
+        # Everything else on this viewset (create/edit/withdraw/remove a batch
+        # enrollment) stays admin-only — only the read-only PDF downloads open
+        # up to a trainer running the batch, mirroring EnrollmentViewSet.report/
+        # .certificate's admin-or-owning-trainer split.
+        if self.action in ('report', 'certificate'):
+            return [IsAdminOrTrainer()]
+        return [IsAdmin()]
+
+    def _check_trainer_owns_batch(self, request, batch_enrollment):
+        if request.user.is_staff:
+            return
+        allowed_ids = batch_ids_for_trainer(request.user.trainer.name)
+        if batch_enrollment.batch_id not in allowed_ids:
+            raise PermissionDenied("You're not listed as a trainer on this batch.")
+
+    @action(detail=True, methods=['get'])
+    def report(self, request, pk=None):
+        batch_enrollment = self.get_object()
+        self._check_trainer_owns_batch(request, batch_enrollment)
+
+        pdf_bytes = render_batch_student_report_pdf(batch_enrollment)
+        slug = re.sub(r'[^A-Za-z0-9]+', '-', batch_enrollment.student.name).strip('-').lower()
+        filename = f'batch-report-{slug}.pdf'
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=True, methods=['get'])
+    def certificate(self, request, pk=None):
+        batch_enrollment = self.get_object()
+        self._check_trainer_owns_batch(request, batch_enrollment)
+        # Batches have no per-student 'completed' state (see BatchEnrollment.
+        # STATUS_CHOICES) — a certificate only makes sense once the whole
+        # batch has finished, and only for a student who's still actively
+        # enrolled (not withdrawn) at that point.
+        if batch_enrollment.batch.status != 'completed':
+            return Response(
+                {'detail': 'A certificate is only available once this batch is completed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if batch_enrollment.status != 'active':
+            return Response(
+                {'detail': 'A certificate is only available for an active batch enrollment.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pdf_bytes = render_batch_certificate_pdf(batch_enrollment)
+        slug = re.sub(r'[^A-Za-z0-9]+', '-', batch_enrollment.student.name).strip('-').lower()
+        filename = f'batch-certificate-{slug}-{batch_enrollment.batch.course.name.lower().replace(" ", "-")}.pdf'
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
     def get_queryset(self):
         qs = super().get_queryset()
