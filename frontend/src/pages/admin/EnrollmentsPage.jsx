@@ -365,10 +365,17 @@ export default function EnrollmentsPage() {
   const [editStartDate, setEditStartDate] = useState('')
   const [editTrainerRate, setEditTrainerRate] = useState('')
   const [editClientRate, setEditClientRate] = useState('')
+  // Full Trainer/Client objects (with course_rates) for the enrollment being edited —
+  // fetched on open so switching Course (only possible pre-enrollment, i.e.
+  // classes_completed === 0) can re-suggest that course's rate/override the same way
+  // the New enrollment form does. Without these, only the id is known and the rate
+  // fields would keep showing the old course's rate after switching.
+  const [editTrainer, setEditTrainer] = useState(null)
+  const [editClient, setEditClient] = useState(null)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 
-  function openEditSchedule(enrollment) {
+  async function openEditSchedule(enrollment) {
     closeTransfer()
     closeWithdraw()
     closeSubstitute()
@@ -380,7 +387,19 @@ export default function EnrollmentsPage() {
     setEditStartDate(enrollment.start_date || '')
     setEditTrainerRate(enrollment.trainer_rate_per_class != null ? String(enrollment.trainer_rate_per_class) : '')
     setEditClientRate(enrollment.client_rate_per_class != null ? String(enrollment.client_rate_per_class) : '')
+    setEditTrainer(null)
+    setEditClient(null)
     setEditError('')
+
+    const trainerPromise = api(`/api/trainers/${enrollment.trainer}/`).catch(() => null)
+    const clientPromise = enrollment.student_source_type === 'B2B'
+      ? api(`/api/students/${enrollment.student}/`)
+          .then((s) => (s.client ? api(`/api/clients/${s.client}/`) : null))
+          .catch(() => null)
+      : Promise.resolve(null)
+    const [trainer, client] = await Promise.all([trainerPromise, clientPromise])
+    setEditTrainer(trainer)
+    setEditClient(client)
   }
 
   function closeEditSchedule() {
@@ -392,7 +411,15 @@ export default function EnrollmentsPage() {
     setEditStartDate('')
     setEditTrainerRate('')
     setEditClientRate('')
+    setEditTrainer(null)
+    setEditClient(null)
     setEditError('')
+  }
+
+  function handleEditCourseChange(v) {
+    setEditCourse(v)
+    if (editTrainer) setEditTrainerRate(String(rateForCourse(editTrainer, v) ?? ''))
+    if (editClient) setEditClientRate(String(rateForCourse(editClient, v) ?? ''))
   }
 
   function toggleEditDay(code) {
@@ -686,7 +713,7 @@ export default function EnrollmentsPage() {
                 placeholder="Search course…"
                 value={editCourse}
                 selectedLabel={editingEnrollment?.course_name}
-                onChange={setEditCourse}
+                onChange={handleEditCourseChange}
                 loadOptions={pickerSearch.courses}
               />
             ) : (
