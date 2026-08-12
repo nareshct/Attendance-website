@@ -102,15 +102,31 @@ them:
   against a target database with migrations already applied.
 
 On Render specifically: "New +" → "Cron Job" (a separate service type from the web
-service), same repo/`rootDir: backend`/environment as the web service (must include
-`DATABASE_URL` and the `EMAIL_*` vars for `backup_database` — without the latter it
-silently falls back to the console email backend and nothing actually sends), with the
-command as the "Command" field and a schedule string, e.g. `0 2 * * *` (daily at 2am
-UTC) for the first two commands, or `0 3 * * 0` (weekly, Sunday 3am UTC) for
-`backup_database`. Render Cron Job schedules run in UTC regardless of the app's
-`TIME_ZONE` setting (`Asia/Kolkata`) — adjust the hour if you want it to land at a
-specific local time. On any other host, or for local use, point `cron` (Linux/macOS)
-or Windows Task Scheduler at the same command instead.
+service — **not free**, billed per run with a $1/month minimum), same
+repo/`rootDir: backend`/environment as the web service, with the command as the
+"Command" field and a schedule like `0 2 * * *` (daily at 2am UTC). Render Cron Job
+schedules run in UTC regardless of the app's `TIME_ZONE` setting (`Asia/Kolkata`) —
+adjust the hour if you want it to land at a specific local time. On any other host, or
+for local use, point `cron` (Linux/macOS) or Windows Task Scheduler at the same
+command instead.
+
+`backup_database` specifically is instead wired up for free via
+**`.github/workflows/db-backup.yml`** — a GitHub Actions scheduled workflow (`cron:
+'30 1 * * 1'`, weekly Monday 7:00 AM IST — GitHub Actions cron always runs in UTC, so
+that's written as Monday 1:30 AM UTC — plus a manual "Run workflow" button via
+`workflow_dispatch`) that installs `backend/requirements.txt` and runs
+`python manage.py backup_database` directly against the production Neon database. To
+enable it, add these as repo secrets (GitHub repo → **Settings** → **Secrets and
+variables** → **Actions** → **New repository secret**), using the same values as the
+Render web service's own env vars (step 2 above) — except `SECRET_KEY`, which can be
+any random string here since this workflow never serves HTTP requests:
+`SECRET_KEY`, `DATABASE_URL`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`,
+`DEFAULT_FROM_EMAIL`. GitHub disables a scheduled workflow automatically after 60 days
+with no commits to the repo — push something (or use "Run workflow" manually) to
+re-enable it if that ever happens. The same free-workflow approach works just as well
+for `send_admin_digest`/`auto_archive_completed_students` if you'd rather not pay for
+a Render Cron Job for those either — just add another `on.schedule` workflow file
+following the same pattern.
 
 ## Moving to a different host later
 
