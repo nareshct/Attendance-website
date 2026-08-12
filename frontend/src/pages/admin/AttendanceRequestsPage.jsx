@@ -2,29 +2,42 @@ import { useCallback, useEffect, useState } from 'react'
 import { Badge } from '../../components/Badge'
 import { Card } from '../../components/Card'
 import { useApi } from '../../hooks/useApi'
+import { usePaginatedList } from '../../hooks/usePaginatedList'
 import { formatDate, formatDateTime } from '../../utils/date'
 
 export default function AttendanceRequestsPage() {
   const api = useApi()
-  const [requests, setRequests] = useState([])
+  // Pending is a small, self-draining queue (admin acts on it promptly) — fetched
+  // whole. Reviewed is permanent history that only ever grows, so it's paginated
+  // with Load more instead, same pattern as ActivityLogPage/PayoutsPage/etc. Fetching
+  // every request ever made in one go (both used to be a single unbounded list) trips
+  // the API client's "more than one page fetched" guard once the combined total passes
+  // the page size — see TrainerDetailPage.jsx's attendance fetch for the same bug.
+  const [pending, setPending] = useState([])
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState(null)
   const [search, setSearch] = useState('')
 
-  const loadRequests = useCallback(async () => {
-    setRequests(await api('/api/attendance-requests/'))
+  const {
+    items: reviewed, count: reviewedCount, hasMore, loading: reviewedLoading, loadingMore,
+    reload: loadReviewed, loadMore, loadLess, page,
+  } = usePaginatedList('/api/attendance-requests/?status=approved,denied')
+
+  const loadPending = useCallback(async () => {
+    setPending(await api('/api/attendance-requests/?status=pending'))
   }, [api])
 
   useEffect(() => {
-    loadRequests().catch((err) => setError(err.message))
-  }, [loadRequests])
+    loadPending().catch((err) => setError(err.message))
+    loadReviewed().catch((err) => setError(err.message))
+  }, [loadPending, loadReviewed])
 
   async function handleApprove(id) {
     setBusyId(id)
     setError('')
     try {
       await api(`/api/attendance-requests/${id}/approve/`, { method: 'POST' })
-      await loadRequests()
+      await Promise.all([loadPending(), loadReviewed()])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -37,16 +50,13 @@ export default function AttendanceRequestsPage() {
     setError('')
     try {
       await api(`/api/attendance-requests/${id}/deny/`, { method: 'POST' })
-      await loadRequests()
+      await Promise.all([loadPending(), loadReviewed()])
     } catch (err) {
       setError(err.message)
     } finally {
       setBusyId(null)
     }
   }
-
-  const pending = requests.filter((r) => r.status === 'pending')
-  const reviewed = requests.filter((r) => r.status !== 'pending')
 
   const filteredPending = pending.filter((r) => {
     const q = search.toLowerCase()
@@ -151,12 +161,37 @@ export default function AttendanceRequestsPage() {
                 <td className="table-cell"><Badge status={r.status} /></td>
               </tr>
             ))}
-            {reviewed.length === 0 && (
+            {!reviewedLoading && reviewed.length === 0 && (
               <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">No reviewed requests yet.</td></tr>
+            )}
+            {reviewedLoading && (
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-text-tertiary">Loading…</td></tr>
             )}
           </tbody>
         </table>
       </Card>
+
+      {!reviewedLoading && reviewed.length > 0 && (
+        <div className="flex items-center justify-between mt-3">
+          <p className="text-xs text-text-tertiary">Showing {reviewed.length} of {reviewedCount}</p>
+          <div className="flex gap-4">
+            {page > 1 && (
+              <button onClick={loadLess} className="text-xs font-medium text-primary hover:underline focus-ring">
+                Load less
+              </button>
+            )}
+            {hasMore && (
+              <button
+                disabled={loadingMore}
+                onClick={loadMore}
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-60 focus-ring"
+              >
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

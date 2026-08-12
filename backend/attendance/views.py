@@ -274,6 +274,15 @@ class AttendanceRequestViewSet(ReadOnlyModelViewSet):
         trainer_id = self.request.query_params.get('trainer')
         if trainer_id:
             qs = qs.filter(requested_by_id=trainer_id)
+        # Comma-separated, e.g. ?status=approved,denied — lets the admin Requests page
+        # fetch "pending" (a small, naturally self-draining queue) and "reviewed" (an
+        # ever-growing history, paginated with Load more) as two separate, bounded
+        # requests instead of one unbounded fetch of every request ever made. See
+        # AttendanceRequestsPage.jsx and the same fail-loud guard this pattern avoids
+        # tripping in api/client.js's unwrapPaginated.
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status__in=status_param.split(','))
         return qs
 
     @action(detail=True, methods=['post'])

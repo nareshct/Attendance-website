@@ -84,7 +84,12 @@ export default function MarkAttendancePage() {
   const combinedHistory = [...visibleHistory, ...deniedRecent].sort((a, b) => b.date.localeCompare(a.date))
 
   const loadRequests = useCallback(async () => {
-    setRequests(await api('/api/attendance-requests/'))
+    // Only pending (shown in "Approval requests") and denied (folded into Recent
+    // attendance, see deniedRecent above) are ever used on this page — approved ones
+    // become real Attendance rows instead, shown via loadHistory. Scoping out
+    // approved keeps this from growing unbounded over a trainer's whole tenure the
+    // same way loadHistory's own start= bound does — see the comment there.
+    setRequests(await api('/api/attendance-requests/?status=pending,denied'))
   }, [api])
 
   useEffect(() => {
