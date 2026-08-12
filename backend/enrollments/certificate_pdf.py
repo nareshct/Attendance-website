@@ -176,6 +176,14 @@ def render_certificate_pdf(enrollment):
     logo = _logo_flowable(_branding_client(student))
     cert_no = f'CERT-{enrollment.id:06d}'
 
+    # The date the last class actually happened — not date.today(), which would drift
+    # every time this certificate is re-downloaded and has nothing to do with when the
+    # student actually finished. Falls back to today only in the (shouldn't-happen,
+    # since the certificate action requires status == 'completed') case of a completed
+    # enrollment with no attendance rows.
+    last_class = enrollment.attendance_records.filter(status='present').order_by('-date').first()
+    completion_date = last_class.date if last_class else date.today()
+
     company_style = ParagraphStyle('Company', fontName='Times-Bold', fontSize=14, textColor=NAVY, alignment=1, spaceAfter=8)
     title_style = ParagraphStyle('Title', fontName='Times-Bold', fontSize=30, textColor=NAVY_DARK, alignment=1, leading=36, spaceAfter=2)
     sub_style = ParagraphStyle('Sub', fontName='Times-Italic', fontSize=13, textColor=GREY, alignment=1, spaceBefore=8, spaceAfter=10)
@@ -202,7 +210,7 @@ def render_certificate_pdf(enrollment):
     elements.append(Paragraph(escape(course.name), course_style))
     elements.append(Paragraph(
         f'{enrollment.classes_total} classes &nbsp;·&nbsp; '
-        f'{enrollment.start_date:%d %b %Y} to {date.today():%d %b %Y}',
+        f'{enrollment.start_date:%d %b %Y} to {completion_date:%d %b %Y}',
         body_style,
     ))
     elements.append(Spacer(1, 10 * mm))

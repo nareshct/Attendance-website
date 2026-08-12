@@ -362,6 +362,7 @@ export default function EnrollmentsPage() {
   const [editClassTime, setEditClassTime] = useState('')
   const [editClassDays, setEditClassDays] = useState([])
   const [editClassesTotal, setEditClassesTotal] = useState('')
+  const [editStartDate, setEditStartDate] = useState('')
   const [editTrainerRate, setEditTrainerRate] = useState('')
   const [editClientRate, setEditClientRate] = useState('')
   const [editSaving, setEditSaving] = useState(false)
@@ -376,6 +377,7 @@ export default function EnrollmentsPage() {
     setEditClassTime((enrollment.class_time || '').slice(0, 5))
     setEditClassDays((enrollment.class_days || '').split(',').filter(Boolean))
     setEditClassesTotal(String(enrollment.classes_total))
+    setEditStartDate(enrollment.start_date || '')
     setEditTrainerRate(enrollment.trainer_rate_per_class != null ? String(enrollment.trainer_rate_per_class) : '')
     setEditClientRate(enrollment.client_rate_per_class != null ? String(enrollment.client_rate_per_class) : '')
     setEditError('')
@@ -387,6 +389,7 @@ export default function EnrollmentsPage() {
     setEditClassTime('')
     setEditClassDays([])
     setEditClassesTotal('')
+    setEditStartDate('')
     setEditTrainerRate('')
     setEditClientRate('')
     setEditError('')
@@ -411,6 +414,7 @@ export default function EnrollmentsPage() {
           class_time: editClassTime,
           class_days: editClassDays.join(','),
           classes_total: Number(editClassesTotal),
+          start_date: editStartDate,
           ...(editTrainerRate !== '' ? { trainer_rate_per_class: editTrainerRate } : {}),
           ...(editingEnrollment?.student_source_type === 'B2B' && editClientRate !== '' ? { client_rate_per_class: editClientRate } : {}),
         },
@@ -725,6 +729,14 @@ export default function EnrollmentsPage() {
                 </Button>
               ))}
             </div>
+          </div>
+          <div className="pt-2 border-t border-gray-100">
+            <label className="block text-xs text-text-secondary mb-1">Start date</label>
+            <input type="date" value={editStartDate} onChange={(ev) => setEditStartDate(ev.target.value)} className="input" />
+            <p className="text-xs text-text-tertiary mt-1">
+              Defaults to the day the enrollment was created — correct this if classes actually started earlier
+              (e.g. entered into the system after the fact). Shows on the completion certificate.
+            </p>
           </div>
           <div className="pt-2 border-t border-gray-100">
             <p className="text-xs text-text-secondary mb-2">

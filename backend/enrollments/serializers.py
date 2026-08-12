@@ -89,10 +89,13 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             'class_time', 'class_days', 'payment_type', 'discount_percent',
             'trainer_rate_per_class', 'client_rate_per_class',
         ]
-        read_only_fields = ['batch_number', 'classes_completed', 'status', 'start_date']
+        read_only_fields = ['batch_number', 'classes_completed', 'status']
         extra_kwargs = {
             'class_time': {'required': True, 'allow_null': False},
             'class_days': {'required': True},
+            # Not required on create — create() always stamps it to today regardless of
+            # what's sent (see create()). Writable so it can be corrected afterward.
+            'start_date': {'required': False},
         }
 
     def validate_class_days(self, value):
@@ -127,6 +130,18 @@ class EnrollmentSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     f'{trainer.name} already has a class at that time — {conflict.student.name} '
                     f'({conflict.course.name}). Choose a different time or trainer.'
+                )
+
+        # start_date defaults to "today" at creation time (see create()) — often wrong
+        # when an enrollment is entered into the system after classes already started
+        # (backdated data entry). Allow correcting it afterward, but not past the first
+        # class actually recorded, which would make attendance predate the enrollment.
+        start_date = attrs.get('start_date')
+        if start_date and self.instance is not None:
+            first_attendance = self.instance.attendance_records.order_by('date').first()
+            if first_attendance and start_date > first_attendance.date:
+                raise serializers.ValidationError(
+                    f"Start date can't be after the first recorded class ({first_attendance.date})."
                 )
 
         # The batch count can be edited after creation (e.g. correcting a typo, or
