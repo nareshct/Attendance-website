@@ -73,8 +73,9 @@ future host migration is just repointing that one DNS record — the frontend's
 
 Nothing in this project runs on a schedule by itself — there's no Celery/APScheduler
 setup, just plain Django management commands meant to be triggered by whatever
-scheduler your host (or OS) provides. Both are safe to run daily and are no-ops when
-there's nothing to do, so it's fine to schedule them even before you need them:
+scheduler your host (or OS) provides. The first two are safe to run daily and are
+no-ops when there's nothing to do, so it's fine to schedule them even before you need
+them:
 
 - `python manage.py send_admin_digest` — emails admins (see `ADMINS` env var, step 3
   above) a summary of overdue B2B invoices and due-but-unpaid B2C installments — the
@@ -85,12 +86,31 @@ there's nothing to do, so it's fine to schedule them even before you need them:
   one course done but another still in progress is left alone. Archiving here is
   non-destructive (just a status flag — fully reversible from the Students page's
   "Unarchive" button), so this is low-risk to leave running unattended.
+- `python manage.py backup_database` — emails every staff account with an email on
+  file a full gzipped JSON dump of the database (Django's `dumpdata`, generated
+  in-process — no `pg_dump` or other external tooling needed, so this works
+  identically on Render, locally, or any host that runs this Django app). Excludes
+  content types, permissions, sessions, and API auth tokens (all auto-regenerated
+  and/or sensitive to leak in an email attachment). **Does not include uploaded media
+  files** (course materials, client logos) — see the note above about those being
+  ephemeral on Render's free tier already. Unlike the two commands above, this one is
+  not a no-op — it sends an email with an attachment every time it runs, so a **weekly**
+  schedule is a more sensible default than daily unless you want a backup email every
+  single day. Complementary to (not a replacement for) Neon's own point-in-time
+  recovery/branching, which needs no setup and is already available on your Neon plan.
+  To restore a dump: `gunzip` the attachment, then `python manage.py loaddata <file>.json`
+  against a target database with migrations already applied.
 
 On Render specifically: "New +" → "Cron Job" (a separate service type from the web
-service), same repo/`rootDir: backend`/environment as the web service, with the
-command as the "Command" field and a schedule like `0 2 * * *` (daily at 2am). On any
-other host, or for local use, point `cron` (Linux/macOS) or Windows Task Scheduler at
-the same command instead.
+service), same repo/`rootDir: backend`/environment as the web service (must include
+`DATABASE_URL` and the `EMAIL_*` vars for `backup_database` — without the latter it
+silently falls back to the console email backend and nothing actually sends), with the
+command as the "Command" field and a schedule string, e.g. `0 2 * * *` (daily at 2am
+UTC) for the first two commands, or `0 3 * * 0` (weekly, Sunday 3am UTC) for
+`backup_database`. Render Cron Job schedules run in UTC regardless of the app's
+`TIME_ZONE` setting (`Asia/Kolkata`) — adjust the hour if you want it to land at a
+specific local time. On any other host, or for local use, point `cron` (Linux/macOS)
+or Windows Task Scheduler at the same command instead.
 
 ## Moving to a different host later
 
