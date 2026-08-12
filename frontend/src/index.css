@@ -123,6 +123,26 @@ body {
   background: #f8fafc;
 }
 
+@layer base {
+  /* Only <a> gets a hand cursor by default — native <button>/<select>/checkbox/
+     radio elements default to the plain arrow (cursor: auto) in every browser,
+     which reads as "not clickable" even though they are. Applied once here
+     instead of per-component so every button/toggle/text-link-styled-as-button
+     across the app (Delete, Details, Reset password, Edit, etc.) gets the hand
+     cursor for free, including ones added later. Sits in @layer base, so any
+     component/utility class (e.g. Button's disabled:cursor-not-allowed) still
+     wins over this regardless of selector specificity. */
+  button:not(:disabled),
+  [role='button']:not(:disabled),
+  select:not(:disabled),
+  input[type='checkbox']:not(:disabled),
+  input[type='radio']:not(:disabled),
+  label:has(> input[type='checkbox']:not(:disabled)),
+  label:has(> input[type='radio']:not(:disabled)) {
+    cursor: pointer;
+  }
+}
+
 @layer components {
   .input {
     @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-navy placeholder:text-gray-400 transition-[border-color,box-shadow] duration-150 ease-out focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary-tint disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-surface-sunken disabled:text-text-secondary;
