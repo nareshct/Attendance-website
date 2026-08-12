@@ -98,8 +98,7 @@ them:
   schedule is a more sensible default than daily unless you want a backup email every
   single day. Complementary to (not a replacement for) Neon's own point-in-time
   recovery/branching, which needs no setup and is already available on your Neon plan.
-  To restore a dump: `gunzip` the attachment, then `python manage.py loaddata <file>.json`
-  against a target database with migrations already applied.
+  See "Restoring a backup locally" below for the exact steps.
 
 On Render specifically: "New +" → "Cron Job" (a separate service type from the web
 service — **not free**, billed per run with a $1/month minimum), same
@@ -127,6 +126,63 @@ re-enable it if that ever happens. The same free-workflow approach works just as
 for `send_admin_digest`/`auto_archive_completed_students` if you'd rather not pay for
 a Render Cron Job for those either — just add another `on.schedule` workflow file
 following the same pattern.
+
+## 6. Restoring a backup locally
+
+Steps to take a `backup_database` email attachment and actually restore it — useful
+both to verify a backup is good and to pull real data into a local dev environment.
+Windows/PowerShell shown; adjust for macOS/Linux where noted.
+
+1. **Save and decompress the attachment.** Save the `.json.gz` file from the backup
+   email into `backend/`, then decompress it (no `gunzip` on Windows by default, so
+   this uses Python instead — works anywhere):
+   ```powershell
+   cd "path\to\backend"
+   ..\venv\Scripts\Activate.ps1   # if "running scripts is disabled", first run:
+                                   # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   python -c "import gzip,shutil; shutil.copyfileobj(gzip.open('apex_binary_backup_YYYYMMDD_HHMMSS.json.gz','rb'), open('restore.json','wb'))"
+   ```
+   (macOS/Linux: `gunzip apex_binary_backup_YYYYMMDD_HHMMSS.json.gz` works directly.)
+
+2. **Pick where to restore it:**
+   - **Just verifying the backup is valid** (recommended first, doesn't touch your
+     real local data) — point at a throwaway scratch database:
+     ```powershell
+     $env:DATABASE_URL = "sqlite:///scratch_restore_test.sqlite3"
+     ```
+   - **Actually replacing your local dev database with real data** — stop
+     `runserver` first (it locks the file), then wipe the existing one so old
+     dummy/seed rows don't linger or collide with restored IDs:
+     ```powershell
+     Remove-Item db.sqlite3
+     ```
+     (Leave `$env:DATABASE_URL` unset here — it should fall back to the default
+     `backend/db.sqlite3`.)
+
+3. **Build the schema, then load the data — in that order, in the same terminal
+   session** (a fresh/reopened terminal loses `$env:DATABASE_URL`, and running
+   `loaddata` before `migrate` fails with `no such table: django_admin_log` or
+   similar):
+   ```powershell
+   python manage.py migrate
+   python manage.py loaddata restore.json
+   ```
+
+4. **Sanity-check it actually restored real rows:**
+   ```powershell
+   python manage.py shell -c "from students.models import Student; from trainers.models import Trainer; print('students:', Student.objects.count(), 'trainers:', Trainer.objects.count())"
+   ```
+
+5. **Clean up** — don't leave the decompressed JSON, the scratch DB, or the env var
+   override lying around:
+   ```powershell
+   Remove-Item restore.json
+   Remove-Item scratch_restore_test.sqlite3 -ErrorAction SilentlyContinue
+   Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue
+   ```
+   If you restored into `db.sqlite3` for real (step 2's second option), remember any
+   local admin login you were using is gone — log in with whatever admin account(s)
+   actually exist in the restored data instead.
 
 ## Moving to a different host later
 
