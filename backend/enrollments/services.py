@@ -243,6 +243,13 @@ def find_schedule_conflict(trainer, class_time, class_days, exclude_enrollment_i
     if date_range:
         start, end = date_range
         covering = covering.filter(start_date__lte=end, end_date__gte=start)
+    else:
+        # No range means this is a permanent commitment (Transfer, new enrollment,
+        # schedule edit) — it only actually clashes with substitute coverage that
+        # hasn't fully ended yet. Without this, an assignment whose end_date is long in
+        # the past (the row is never deleted on expiry, see SubstituteAssignment's
+        # docstring) would incorrectly count as "still busy" forever.
+        covering = covering.filter(end_date__gte=timezone.localdate())
     for assignment in covering:
         if days & set((assignment.enrollment.class_days or '').split(',')):
             return assignment.enrollment

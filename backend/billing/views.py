@@ -35,6 +35,12 @@ class BillingCycleViewSet(ModelViewSet):
     # No DELETE — cycles are only ever closed (see close below), never hard-deleted, so
     # the Payout/ClientInvoice/CycleRevenueSnapshot history tied to them can never be lost.
     http_method_names = ['get', 'post', 'put', 'patch', 'head', 'options']
+    # PayoutsPage/ReportsPage fetch this whole list to populate a cycle picker/dropdown,
+    # not a "Load more" table — pagination doesn't fit that UX. Unlike per-class records
+    # (Attendance, AttendanceRequest), a cycle is a fixed calendar construct capped at 2
+    # per month, so unlike those, unpaginated here never becomes a real problem: even 40
+    # years of operation is under 1,000 rows.
+    pagination_class = None
 
     @action(detail=False, methods=['post'])
     def generate_current(self, request):

@@ -311,6 +311,16 @@ class SubstituteAssignmentViewSet(ModelViewSet):
         enrollment_id = self.request.query_params.get('enrollment')
         if enrollment_id:
             qs = qs.filter(enrollment_id=enrollment_id)
+        if self.action == 'list':
+            # Per the class docstring, this listing is for current/upcoming coverage —
+            # an assignment whose end_date has already passed isn't live scheduling
+            # info anymore. Without this, the list grows forever (every substitute
+            # assignment ever made stays in it) and the frontend's schedule-conflict
+            # pre-check and "covering" badge (EnrollmentsPage.jsx) were both treating
+            # long-expired coverage as if it were still active. The row itself is never
+            # deleted (see the model docstring), so this only affects what's listed by
+            # default — retrieve/destroy by id still work on an expired row.
+            qs = qs.filter(end_date__gte=timezone.localdate())
         return qs
 
     def perform_destroy(self, instance):
