@@ -87,7 +87,8 @@ export default function TrainerDetailPage() {
   }, [api, id])
 
   const loadAttendance = useCallback(() => {
-    return api(`/api/attendance/?trainer=${id}`).then(setAttendance)
+    const { start } = lastCycleBoundsFor(new Date())
+    return api(`/api/attendance/?trainer=${id}&start=${start}`).then(setAttendance)
   }, [api, id])
 
   useEffect(() => {
@@ -270,10 +271,7 @@ export default function TrainerDetailPage() {
   const ratedCourseIds = new Set(trainer.course_rates.map((r) => r.course))
   const availableCourses = courses.filter((c) => !ratedCourseIds.has(c.id))
 
-  const lastCycleStart = lastCycleBoundsFor(new Date()).start
-  const visibleAttendance = attendance
-    .filter((a) => a.date >= lastCycleStart)
-    .sort((a, b) => b.date.localeCompare(a.date))
+  const visibleAttendance = [...attendance].sort((a, b) => b.date.localeCompare(a.date))
 
   const ongoingEnrollments = enrollments.filter((e) => e.status === 'ongoing')
 

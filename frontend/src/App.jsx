@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { ApiWarningProvider } from './context/ApiWarningProvider'
 import { AuthProvider } from './context/AuthContext'
 import { useApi } from './hooks/useApi'
 import LoginPage from './pages/LoginPage'
@@ -79,60 +80,62 @@ function TrainerShell() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/reset-password/:uid/:token" element={<ResetPasswordPage />} />
-        <Route path="/parent/:token" element={<ParentSharePage />} />
+    <ApiWarningProvider>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/reset-password/:uid/:token" element={<ResetPasswordPage />} />
+          <Route path="/parent/:token" element={<ParentSharePage />} />
 
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute role="admin">
-              <Layout title="Admin" navItems={ADMIN_NAV} accentClass="bg-navy" />
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<AdminDashboard />} />
-          <Route path="students" element={<StudentsPage />} />
-          <Route path="students/:id" element={<StudentProfilePage />} />
-          <Route path="trainers" element={<TrainersPage />} />
-          <Route path="trainers/:id" element={<TrainerDetailPage />} />
-          <Route path="clients" element={<ClientsPage />} />
-          <Route path="clients/:id" element={<ClientDetailPage />} />
-          <Route path="courses" element={<CoursesPage />} />
-          <Route path="course-materials" element={<CourseMaterialsPage />} />
-          <Route path="enrollments" element={<EnrollmentsPage />} />
-          <Route path="batches" element={<BatchesPage />} />
-          <Route path="batches/:id" element={<BatchDetailPage />} />
-          <Route path="attendance-requests" element={<AttendanceRequestsPage />} />
-          <Route path="payouts" element={<PayoutsPage />} />
-          <Route path="reports" element={<ReportsPage />} />
-          <Route path="activity-log" element={<ActivityLogPage />} />
-          <Route path="change-password" element={<ChangePasswordPage />} />
-        </Route>
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute role="admin">
+                <Layout title="Admin" navItems={ADMIN_NAV} accentClass="bg-navy" />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="students" element={<StudentsPage />} />
+            <Route path="students/:id" element={<StudentProfilePage />} />
+            <Route path="trainers" element={<TrainersPage />} />
+            <Route path="trainers/:id" element={<TrainerDetailPage />} />
+            <Route path="clients" element={<ClientsPage />} />
+            <Route path="clients/:id" element={<ClientDetailPage />} />
+            <Route path="courses" element={<CoursesPage />} />
+            <Route path="course-materials" element={<CourseMaterialsPage />} />
+            <Route path="enrollments" element={<EnrollmentsPage />} />
+            <Route path="batches" element={<BatchesPage />} />
+            <Route path="batches/:id" element={<BatchDetailPage />} />
+            <Route path="attendance-requests" element={<AttendanceRequestsPage />} />
+            <Route path="payouts" element={<PayoutsPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="activity-log" element={<ActivityLogPage />} />
+            <Route path="change-password" element={<ChangePasswordPage />} />
+          </Route>
 
-        <Route
-          path="/trainer"
-          element={
-            <ProtectedRoute role="trainer">
-              <TrainerShell />
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<TrainerDashboard />} />
-          <Route path="my-students" element={<MyStudentsPage />} />
-          <Route path="students/:id" element={<TrainerStudentProfilePage />} />
-          <Route path="mark-attendance" element={<MarkAttendancePage />} />
-          <Route path="my-batches" element={<TrainerBatchesPage />} />
-          <Route path="my-earnings" element={<MyEarningsPage />} />
-          <Route path="course-materials" element={<TrainerCourseMaterialsPage />} />
-          <Route path="change-password" element={<ChangePasswordPage />} />
-        </Route>
+          <Route
+            path="/trainer"
+            element={
+              <ProtectedRoute role="trainer">
+                <TrainerShell />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<TrainerDashboard />} />
+            <Route path="my-students" element={<MyStudentsPage />} />
+            <Route path="students/:id" element={<TrainerStudentProfilePage />} />
+            <Route path="mark-attendance" element={<MarkAttendancePage />} />
+            <Route path="my-batches" element={<TrainerBatchesPage />} />
+            <Route path="my-earnings" element={<MyEarningsPage />} />
+            <Route path="course-materials" element={<TrainerCourseMaterialsPage />} />
+            <Route path="change-password" element={<ChangePasswordPage />} />
+          </Route>
 
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    </AuthProvider>
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </AuthProvider>
+    </ApiWarningProvider>
   )
 }

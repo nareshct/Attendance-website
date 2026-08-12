@@ -7,6 +7,12 @@ export class ApiError extends Error {
   }
 }
 
+// Not a real HTTP status — a sentinel ApiError.status set by unwrapPaginated below,
+// used by hooks/useApi.js to recognize this specific failure and show a single
+// app-wide popup for it (see context/ApiWarningProvider.jsx) instead of each page
+// rendering its own inline error text.
+export const PAGINATION_GUARD_STATUS = 599
+
 // DRF's PageNumberPagination wraps list responses as {count, next, previous, results}.
 // Most pages just expect a bare array from a list endpoint, so unwrap it here in one
 // place rather than touching every page — see DEFAULT_PAGINATION_CLASS in
@@ -24,7 +30,7 @@ function unwrapPaginated(data) {
     if (data.next) {
       throw new ApiError(
         'This list has more results than the app fetched (it only reads the first page) — numbers on this page would be incomplete.',
-        599,
+        PAGINATION_GUARD_STATUS,
       )
     }
     return data.results
