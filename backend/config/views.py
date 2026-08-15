@@ -9,16 +9,28 @@ from django.db.models import Q
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import status
-from rest_framework.authentication import TokenAuthentication
-from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.services import log_action
 
+from .authentication import AuthTokenAuthentication
+from .models import AuthToken
 from .permissions import IsAdmin
 from .throttling import LoginRateThrottle, PasswordResetRateThrottle
+
+
+def resolve_identity(user):
+    """(role, display_name) for a user account. Checked in this order because an
+    account is expected to have at most one of these linked profiles — 'admin' is
+    the fallback for every other authenticated account (unchanged from before
+    'client' existed: any non-trainer account was always called 'admin')."""
+    if hasattr(user, 'trainer'):
+        return 'trainer', user.trainer.name
+    if hasattr(user, 'client'):
+        return 'client', user.client.company_name
+    return 'admin', user.username
 
 
 class LoginView(APIView):
@@ -33,30 +45,36 @@ class LoginView(APIView):
         if user is None:
             return Response({'detail': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        token, _ = Token.objects.get_or_create(user=user)
-        is_trainer = hasattr(user, 'trainer')
-        log_action(user, 'login', user.trainer.name if is_trainer else user.username, 'trainer' if is_trainer else 'admin')
+        # A fresh token per login, not get_or_create — each device/browser gets its own
+        # row (see AuthToken's docstring) so they don't share one key and can't knock
+        # each other's sessions out.
+        token = AuthToken.objects.create(user=user)
+        role, name = resolve_identity(user)
+        log_action(user, 'login', name, role)
         return Response({
             'token': token.key,
             'user_id': user.id,
             'username': user.username,
-            'name': user.trainer.name if is_trainer else user.username,
+            'name': name,
             'is_staff': user.is_staff,
-            'role': 'trainer' if is_trainer else 'admin',
+            'role': role,
         })
 
 
 class LogoutView(APIView):
-    authentication_classes = [TokenAuthentication]
+    authentication_classes = [AuthTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        request.user.auth_token.delete()
+        # Only the token this specific request authenticated with — not every token
+        # the user has (see AuthToken's docstring) — so signing out on one device
+        # leaves other devices' sessions alone.
+        request.auth.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ChangePasswordView(APIView):
-    authentication_classes = [TokenAuthentication]
+    authentication_classes = [AuthTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -77,15 +95,15 @@ class ChangePasswordView(APIView):
 
         request.user.set_password(new_password)
         request.user.save(update_fields=['password'])
-        # Rotate the auth token rather than just deleting it — the request making this
-        # call is itself authenticated with the old token, so a bare delete would lock
-        # the user out of their own change-password request's session immediately. The
-        # new token is handed back so the frontend can swap it in place, while any OTHER
-        # copy of the old token (a stale/leaked session) stops working right away.
-        Token.objects.filter(user=request.user).delete()
-        token = Token.objects.create(user=request.user)
-        is_trainer = hasattr(request.user, 'trainer')
-        log_action(request.user, 'password_change', request.user.trainer.name if is_trainer else request.user.username)
+        # Rotate every token for this user, including this request's own — a password
+        # change is a deliberate "sign out everywhere" moment (compromised password,
+        # etc.), unlike a plain login/logout which now only ever touches one device's
+        # token (see AuthToken's docstring). The new token is handed back so the
+        # frontend can swap it in place for *this* device.
+        AuthToken.objects.filter(user=request.user).delete()
+        token = AuthToken.objects.create(user=request.user)
+        _, name = resolve_identity(request.user)
+        log_action(request.user, 'password_change', name)
         return Response({'token': token.key})
 
 
@@ -95,18 +113,18 @@ class MeView(APIView):
     relying on the (possibly stale) copy cached in the frontend from login.
     """
 
-    authentication_classes = [TokenAuthentication]
+    authentication_classes = [AuthTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
-        is_trainer = hasattr(user, 'trainer')
+        role, name = resolve_identity(user)
         return Response({
             'username': user.username,
             'email': user.email,
-            'name': user.trainer.name if is_trainer else user.username,
+            'name': name,
             'is_staff': user.is_staff,
-            'role': 'trainer' if is_trainer else 'admin',
+            'role': role,
         })
 
 
@@ -116,7 +134,7 @@ class UpdateEmailView(APIView):
     password-reset request needs and there's no other way to add it later.
     """
 
-    authentication_classes = [TokenAuthentication]
+    authentication_classes = [AuthTokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -209,14 +227,15 @@ class PasswordResetConfirmView(APIView):
 
         user.set_password(new_password)
         user.save(update_fields=['password'])
-        # Invalidate any session that was active before this reset — the whole point of
-        # "forgot password" is often that access needs cutting off, not just that the
-        # user forgot the old value. The user is anonymous at this point (this is the
-        # emailed-link flow, not a logged-in change), so unlike ChangePasswordView there's
-        # no "current request's own token" to preserve — they'll get a fresh one on login.
-        Token.objects.filter(user=user).delete()
-        is_trainer = hasattr(user, 'trainer')
-        log_action(user, 'password_reset', user.trainer.name if is_trainer else user.username)
+        # Invalidate every session (every device's token) that was active before this
+        # reset — the whole point of "forgot password" is often that access needs
+        # cutting off, not just that the user forgot the old value. The user is
+        # anonymous at this point (this is the emailed-link flow, not a logged-in
+        # change), so unlike ChangePasswordView there's no "current request's own
+        # token" to preserve — they'll get a fresh one on login.
+        AuthToken.objects.filter(user=user).delete()
+        _, name = resolve_identity(user)
+        log_action(user, 'password_reset', name)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

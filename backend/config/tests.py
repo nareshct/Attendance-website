@@ -7,12 +7,13 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
-from rest_framework.authtoken.models import Token
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from audit.models import AuditLog
+from clients.models import Client
 from trainers.models import Trainer
 
+from .models import AuthToken
 from .views import (
     ChangePasswordView,
     LoginView,
@@ -87,16 +88,54 @@ class LoginViewTests(TestCase):
         entry = AuditLog.objects.get(action='login', object_repr='Login Trainer')
         self.assertEqual(entry.detail, 'trainer')
 
+    def test_client_login_returns_client_role(self):
+        user = get_user_model().objects.create_user(username='login_client_user', password='CorrectPass123!')
+        Client.objects.create(company_name='Login Client Co', contact_phone='123', rate_per_class=200, user=user)
+        request = self.factory.post('/api/auth/login/', {'username': 'login_client_user', 'password': 'CorrectPass123!'}, format='json')
+        response = LoginView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['role'], 'client')
+        self.assertEqual(response.data['name'], 'Login Client Co')
+
+    def test_client_login_logs_the_company_name_not_the_username(self):
+        user = get_user_model().objects.create_user(username='login_client_audit_user', password='CorrectPass123!')
+        Client.objects.create(company_name='Audit Client Co', contact_phone='123', rate_per_class=200, user=user)
+        request = self.factory.post('/api/auth/login/', {'username': 'login_client_audit_user', 'password': 'CorrectPass123!'}, format='json')
+        LoginView.as_view()(request)
+        entry = AuditLog.objects.get(action='login', object_repr='Audit Client Co')
+        self.assertEqual(entry.detail, 'client')
+
+    def test_logging_in_again_from_another_device_does_not_invalidate_the_first(self):
+        get_user_model().objects.create_user(username='multi_device_user', password='CorrectPass123!')
+        body = {'username': 'multi_device_user', 'password': 'CorrectPass123!'}
+        first = LoginView.as_view()(self.factory.post('/api/auth/login/', body, format='json'))
+        second = LoginView.as_view()(self.factory.post('/api/auth/login/', body, format='json'))
+
+        self.assertNotEqual(first.data['token'], second.data['token'], 'each login should get its own token')
+        self.assertTrue(AuthToken.objects.filter(key=first.data['token']).exists(), "device A's token must still work")
+        self.assertTrue(AuthToken.objects.filter(key=second.data['token']).exists())
+
 
 class LogoutViewTests(TestCase):
     def test_logout_deletes_the_auth_token(self):
         user = get_user_model().objects.create_user(username='logout_user', password='x')
-        Token.objects.create(user=user)
+        token = AuthToken.objects.create(user=user)
         request = APIRequestFactory().post('/api/auth/logout/')
-        force_authenticate(request, user=user)
+        force_authenticate(request, user=user, token=token)
         response = LogoutView.as_view()(request)
         self.assertEqual(response.status_code, 204)
-        self.assertFalse(Token.objects.filter(user=user).exists())
+        self.assertFalse(AuthToken.objects.filter(key=token.key).exists())
+
+    def test_logout_leaves_other_devices_tokens_alone(self):
+        user = get_user_model().objects.create_user(username='logout_multi_device_user', password='x')
+        this_device = AuthToken.objects.create(user=user)
+        other_device = AuthToken.objects.create(user=user)
+        request = APIRequestFactory().post('/api/auth/logout/')
+        force_authenticate(request, user=user, token=this_device)
+        response = LogoutView.as_view()(request)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(AuthToken.objects.filter(key=this_device.key).exists())
+        self.assertTrue(AuthToken.objects.filter(key=other_device.key).exists())
 
 
 class ChangePasswordViewTests(TestCase):
@@ -126,13 +165,19 @@ class ChangePasswordViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_changing_password_rotates_the_auth_token(self):
-        old_token = Token.objects.create(user=self.user)
+        old_token = AuthToken.objects.create(user=self.user)
         response = self._post(current_password='OldPass123!', new_password='NewPass456!')
         self.assertEqual(response.status_code, 200)
         self.assertIn('token', response.data)
         self.assertNotEqual(response.data['token'], old_token.key)
-        self.assertFalse(Token.objects.filter(key=old_token.key).exists())
-        self.assertTrue(Token.objects.filter(user=self.user, key=response.data['token']).exists())
+        self.assertFalse(AuthToken.objects.filter(key=old_token.key).exists())
+        self.assertTrue(AuthToken.objects.filter(user=self.user, key=response.data['token']).exists())
+
+    def test_changing_password_signs_out_every_other_device(self):
+        other_device = AuthToken.objects.create(user=self.user)
+        response = self._post(current_password='OldPass123!', new_password='NewPass456!')
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(AuthToken.objects.filter(key=other_device.key).exists())
 
     def test_successful_change_writes_an_audit_log_entry(self):
         response = self._post(current_password='OldPass123!', new_password='NewPass456!')
@@ -165,6 +210,16 @@ class MeViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['name'], 'Priya T')
         self.assertEqual(response.data['role'], 'trainer')
+
+    def test_returns_client_profile_with_company_name_and_role(self):
+        user = get_user_model().objects.create_user(username='me_client', password='x')
+        Client.objects.create(company_name='Me Client Co', contact_phone='123', rate_per_class=200, user=user)
+        request = APIRequestFactory().get('/api/auth/me/')
+        force_authenticate(request, user=user)
+        response = MeView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'Me Client Co')
+        self.assertEqual(response.data['role'], 'client')
 
 
 class UpdateEmailViewTests(TestCase):
@@ -234,13 +289,13 @@ class PasswordResetConfirmViewTests(TestCase):
         self.assertTrue(self.user.check_password('BrandNewPass789!'))
 
     def test_resetting_the_password_deletes_any_existing_auth_token(self):
-        old_token = Token.objects.create(user=self.user)
+        old_token = AuthToken.objects.create(user=self.user)
         request = self.factory.post('/api/auth/password-reset/confirm/', {
             'uid': self.uidb64, 'token': self.token, 'new_password': 'BrandNewPass789!',
         }, format='json')
         response = PasswordResetConfirmView.as_view()(request)
         self.assertEqual(response.status_code, 204)
-        self.assertFalse(Token.objects.filter(key=old_token.key).exists())
+        self.assertFalse(AuthToken.objects.filter(key=old_token.key).exists())
 
     def test_successful_reset_writes_an_audit_log_entry(self):
         request = self.factory.post('/api/auth/password-reset/confirm/', {

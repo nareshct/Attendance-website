@@ -3,7 +3,6 @@ from decimal import Decimal
 
 from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
-from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient, APIRequestFactory, APITestCase, force_authenticate
 
 from attendance.models import Attendance, AttendanceRequest
@@ -11,6 +10,7 @@ from audit.models import AuditLog
 from batches.models import Batch, BatchPayout
 from billing.models import BillingCycle, Payout, PayoutAdjustment
 from billing.services import get_or_create_cycle
+from config.models import AuthToken
 from courses.models import Course
 from enrollments.models import Enrollment, SubstituteAssignment
 from students.models import Student
@@ -123,7 +123,7 @@ class TrainerArchiveLoginTests(APITestCase):
         self.assertIsNotNone(authenticate(username='archive_me_trainer', password='pw12345'))
 
     def test_archived_trainers_existing_token_stops_working_immediately(self):
-        token = Token.objects.create(user=self.user)
+        token = AuthToken.objects.create(user=self.user)
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
 
@@ -168,10 +168,10 @@ class TrainerResetPasswordTests(APITestCase):
         return TrainerViewSet.as_view({'post': 'reset_password'})(request, pk=self.trainer.id)
 
     def test_reset_deletes_the_trainers_existing_token(self):
-        token = Token.objects.create(user=self.user)
+        token = AuthToken.objects.create(user=self.user)
         response = self._reset('BrandNewPass456!')
         self.assertEqual(response.status_code, 204)
-        self.assertFalse(Token.objects.filter(key=token.key).exists())
+        self.assertFalse(AuthToken.objects.filter(key=token.key).exists())
 
     def test_reset_is_written_to_the_audit_log(self):
         self._reset('BrandNewPass456!')

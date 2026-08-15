@@ -7,9 +7,9 @@ from django.contrib.auth.models import AnonymousUser
 from django.core import mail
 from django.core.management import call_command
 from django.test import TestCase
-from rest_framework.authtoken.models import Token
 from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
 
+from config.models import AuthToken
 from trainers.models import Trainer
 
 from .models import AuditLog
@@ -184,12 +184,13 @@ class BackupDatabaseCommandTests(TestCase):
         admin = get_user_model().objects.create_user(
             username='backup_excl_admin', password='x', is_staff=True, email='excl@example.com',
         )
-        Token.objects.create(user=admin)
+        AuthToken.objects.create(user=admin)
 
         call_command('backup_database')
 
         _, content, _ = mail.outbox[0].attachments[0]
         models_present = {r['model'] for r in json.loads(gzip.decompress(content).decode('utf-8'))}
+        self.assertNotIn('config.authtoken', models_present)
         self.assertNotIn('authtoken.token', models_present)
         self.assertNotIn('sessions.session', models_present)
         self.assertNotIn('auth.permission', models_present)

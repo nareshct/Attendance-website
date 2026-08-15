@@ -5,7 +5,6 @@ from django.core.exceptions import ValidationError
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from rest_framework import filters, status
-from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
@@ -15,6 +14,7 @@ from audit.services import log_action
 from billing.models import Payout
 from billing.serializers import PayoutSerializer
 from billing.services import AlreadyDecidedCycleMismatch, current_cycle_summary, settle_trainer_current_cycle
+from config.models import AuthToken
 from config.permissions import IsAdmin
 
 from .models import Trainer, TrainerCourseRate
@@ -153,11 +153,12 @@ class TrainerViewSet(ModelViewSet):
 
         trainer.user.set_password(new_password)
         trainer.user.save(update_fields=['password'])
-        # Kill any session the trainer is currently logged in with — an admin-triggered
-        # reset (e.g. after a leaked password) should cut off existing access immediately,
-        # not just block the old password going forward. They'll get a fresh token on
-        # their next login (Token.objects.get_or_create in LoginView).
-        Token.objects.filter(user=trainer.user).delete()
+        # Kill every session (every device's token) the trainer is currently logged in
+        # with — an admin-triggered reset (e.g. after a leaked password) should cut off
+        # existing access immediately, not just block the old password going forward.
+        # They'll get a fresh token on their next login (AuthToken.objects.create in
+        # LoginView — see AuthToken's docstring for why it's one row per login).
+        AuthToken.objects.filter(user=trainer.user).delete()
         log_action(request.user, 'trainer_reset_password', trainer.name)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
