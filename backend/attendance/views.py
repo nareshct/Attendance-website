@@ -149,13 +149,19 @@ class AttendanceViewSet(ModelViewSet):
                     new_detail='This is a second class for this student today — a request has been sent to admin for approval.',
                 )
 
-            if _is_closed(attendance_date):
-                return self._request_approval(
-                    enrollment, attendance_date, serializer.validated_data.get('topic_covered', ''), user.trainer,
-                    request_type='late_entry',
-                    pending_detail='A request for this date is already pending admin approval.',
-                    new_detail='This date falls in a closed billing cycle. Your request has been sent to admin for approval.',
-                )
+        # Applies to admins too, not just trainers — see perform_update/perform_destroy
+        # below for the same reasoning: once a cycle closes, its Payout/ClientInvoice
+        # totals are frozen, so attendance created directly in one here would never be
+        # reflected in them. Safe to read user.trainer unconditionally — create()'s
+        # permission is IsTrainer-only, so reaching this line already guarantees it
+        # exists, staff or not.
+        if _is_closed(attendance_date):
+            return self._request_approval(
+                enrollment, attendance_date, serializer.validated_data.get('topic_covered', ''), user.trainer,
+                request_type='late_entry',
+                pending_detail='A request for this date is already pending admin approval.',
+                new_detail='This date falls in a closed billing cycle. Your request has been sent to admin for approval.',
+            )
 
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
@@ -336,6 +342,19 @@ class AttendanceRequestViewSet(ReadOnlyModelViewSet):
             ).exclude(status='open').first()
             if cycle:
                 current_cycle, _ = get_or_create_cycle()
+                # Locked so a concurrent BillingCycleViewSet.close() on today's cycle
+                # can't finish (freezing its Payout/ClientInvoice totals) in the gap
+                # between resolving "the current cycle" and actually creating the
+                # adjustments below — same lock close() itself takes on the same row.
+                # If it turns out to have been closed in that exact gap, fail loudly
+                # (the whole approval rolls back, request stays pending for a retry)
+                # rather than silently creating an adjustment that will never be
+                # recalculated into anything, on a cycle whose totals are already frozen.
+                current_cycle = BillingCycle.objects.select_for_update().get(pk=current_cycle.pk)
+                if current_cycle.status != 'open':
+                    raise ValidationError(
+                        'The current billing cycle was just closed — try approving this request again.'
+                    )
 
                 # An enrollment-specific rate (set on the enrollment form) always wins —
                 # see Enrollment.trainer_rate_per_class. Otherwise, bill this class at the

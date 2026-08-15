@@ -2,7 +2,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from rest_framework import filters, status
 from rest_framework.decorators import action
@@ -358,11 +358,7 @@ class BatchEnrollmentViewSet(ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def withdraw(self, request, pk=None):
-        enrollment = self.get_object()
-        if enrollment.status != 'active':
-            return Response(
-                {'detail': 'Only an active batch enrollment can be withdrawn.'}, status=status.HTTP_400_BAD_REQUEST,
-            )
+        self.get_object()  # 404 if missing, runs the standard permission checks
 
         refund_amount = Decimal('0')
         raw_refund = request.data.get('refund_amount')
@@ -374,14 +370,24 @@ class BatchEnrollmentViewSet(ModelViewSet):
             if refund_amount < 0:
                 return Response({'detail': 'refund_amount cannot be negative.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        enrollment.status = 'withdrawn'
-        update_fields = ['status']
-        if refund_amount:
-            enrollment.refunded_amount = refund_amount
-            enrollment.refund_note = (request.data.get('refund_note') or '').strip()
-            update_fields += ['refunded_amount', 'refund_note']
-        enrollment.save(update_fields=update_fields)
-        enrollment.installments.filter(paid_status='pending').update(paid_status='cancelled')
+        # Locked for the duration of this transaction so two concurrent "withdraw"
+        # clicks can't both pass the status check before either writes — see
+        # BillingCycleViewSet.close() (backend/billing/views.py) for the same pattern.
+        with transaction.atomic():
+            enrollment = BatchEnrollment.objects.select_related('batch').select_for_update().get(pk=pk)
+            if enrollment.status != 'active':
+                return Response(
+                    {'detail': 'Only an active batch enrollment can be withdrawn.'}, status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            enrollment.status = 'withdrawn'
+            update_fields = ['status']
+            if refund_amount:
+                enrollment.refunded_amount = refund_amount
+                enrollment.refund_note = (request.data.get('refund_note') or '').strip()
+                update_fields += ['refunded_amount', 'refund_note']
+            enrollment.save(update_fields=update_fields)
+            enrollment.installments.filter(paid_status='pending').update(paid_status='cancelled')
 
         detail = f'refunded ₹{refund_amount}' if refund_amount else ''
         log_action(request.user, 'batch_withdraw', f'{enrollment.display_name} — {enrollment.batch.name}', detail)
@@ -389,14 +395,19 @@ class BatchEnrollmentViewSet(ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def reactivate(self, request, pk=None):
-        enrollment = self.get_object()
-        if enrollment.status != 'withdrawn':
-            return Response(
-                {'detail': 'Only a withdrawn batch enrollment can be reactivated.'}, status=status.HTTP_400_BAD_REQUEST,
-            )
-        enrollment.status = 'active'
-        enrollment.save(update_fields=['status'])
-        enrollment.installments.filter(paid_status='cancelled').update(paid_status='pending')
+        self.get_object()  # 404 if missing, runs the standard permission checks
+
+        # Same locking reasoning as withdraw() above.
+        with transaction.atomic():
+            enrollment = BatchEnrollment.objects.select_related('batch').select_for_update().get(pk=pk)
+            if enrollment.status != 'withdrawn':
+                return Response(
+                    {'detail': 'Only a withdrawn batch enrollment can be reactivated.'}, status=status.HTTP_400_BAD_REQUEST,
+                )
+            enrollment.status = 'active'
+            enrollment.save(update_fields=['status'])
+            enrollment.installments.filter(paid_status='cancelled').update(paid_status='pending')
+
         log_action(request.user, 'batch_reactivate', f'{enrollment.display_name} — {enrollment.batch.name}', '')
         return Response(BatchEnrollmentSerializer(enrollment).data)
 

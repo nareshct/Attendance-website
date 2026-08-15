@@ -28,11 +28,15 @@ class Enrollment(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='ongoing')
     class_time = models.TimeField(null=True, blank=True)
     class_days = models.CharField(max_length=50, blank=True, default='', help_text='Comma-separated day codes, e.g. MON,WED,FRI')
-    # Snapshots of the trainer's/client's per-class rate at enrollment time, for display
-    # on the enrollment record only. Payout and billing math never reads these — they
-    # always use billing.RateHistory (effective-dated) or the trainer's/client's live
-    # rate — since a single enrollment can span rate changes over its lifetime. See
-    # attendance/views.py, clients/services.py and billing/services.py.
+    # Snapshots of the trainer's/client's per-class rate at enrollment time. Despite being
+    # called a "snapshot," these ARE read live by payout/billing math (clients/services.py's
+    # client_totals, billing/services.py's trainer_totals_for_range/b2c_totals_for_range,
+    # attendance/serializers.py's get_trainer_rate) — an enrollment-specific override that
+    # wins over billing.RateHistory (effective-dated) or the trainer's/client's live rate.
+    # EnrollmentSerializer.validate() blocks editing either one once classes_completed > 0,
+    # for exactly the same reason as its course-change guard: since these are read live for
+    # every already-taught class in this enrollment, editing them after the fact would
+    # retroactively re-bill/re-pay those past sessions at the new rate.
     trainer_rate_per_class = models.DecimalField(
         max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)],
     )

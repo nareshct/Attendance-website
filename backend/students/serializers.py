@@ -19,6 +19,13 @@ class StudentSerializer(serializers.ModelSerializer):
         client = attrs.get('client', getattr(self.instance, 'client', None))
         if source_type == 'B2B' and not client:
             raise serializers.ValidationError({'client': 'A client is required for B2B students.'})
+        # The inverse also matters, not just B2B's requirement — client-scoped billing
+        # (clients/services.py client_totals) and the client portal (client_students_
+        # with_progress, MyClientStudentsView) both filter purely by student.client_id,
+        # not source_type, so a B2C student left with a client set would bleed into that
+        # client's billing totals and portal student list.
+        if source_type != 'B2B' and client:
+            raise serializers.ValidationError({'client': 'A client can only be set for B2B students.'})
 
         if self.instance is not None:
             # billing/services.py reads student.source_type live (not a per-enrollment

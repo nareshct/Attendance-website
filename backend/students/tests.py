@@ -294,6 +294,56 @@ class StudentSourceTypeClientChangeGuardTests(APITestCase):
         self.assertEqual(student.name, 'New Name')
 
 
+class StudentB2CCannotHaveClientTests(APITestCase):
+    """The inverse of B2B's 'client is required' rule — client-scoped billing
+    (clients/services.py client_totals) and the client portal both filter purely by
+    student.client_id, not source_type, so a B2C student left with a client set would
+    bleed into that client's billing/portal. See StudentSerializer.validate()."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_b2c_client_guard', password='x', is_staff=True)
+        self.client_obj = Client.objects.create(company_name='B2C Guard Co', contact_phone='123', rate_per_class=Decimal('200'))
+        self.factory = APIRequestFactory()
+
+    def test_cannot_create_a_b2c_student_with_a_client(self):
+        request = self.factory.post('/api/students/', {
+            'name': 'B2C With Client', 'grade': '5', 'source_type': 'B2C', 'client': self.client_obj.id,
+        }, format='json')
+        force_authenticate(request, user=self.admin)
+        response = StudentViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Student.objects.filter(name='B2C With Client').exists())
+
+    def test_cannot_patch_a_b2c_student_to_add_a_client(self):
+        student = Student.objects.create(name='B2C No Client', grade='5', source_type='B2C')
+        request = self.factory.patch(f'/api/students/{student.id}/', {'client': self.client_obj.id}, format='json')
+        force_authenticate(request, user=self.admin)
+        response = StudentViewSet.as_view({'patch': 'partial_update'})(request, pk=student.id)
+        self.assertEqual(response.status_code, 400)
+        student.refresh_from_db()
+        self.assertIsNone(student.client_id)
+
+    def test_b2c_student_with_no_client_is_still_valid(self):
+        request = self.factory.post('/api/students/', {
+            'name': 'Plain B2C', 'grade': '5', 'source_type': 'B2C',
+        }, format='json')
+        force_authenticate(request, user=self.admin)
+        response = StudentViewSet.as_view({'post': 'create'})(request)
+        self.assertEqual(response.status_code, 201, response.data)
+
+
+class StudentListInvalidClientFilterTests(APITestCase):
+    """A non-numeric ?client= previously went straight into a queryset filter with no
+    validation, raising an unhandled ValueError (500) instead of a clean 400."""
+
+    def test_rejects_a_malformed_client_filter(self):
+        admin = get_user_model().objects.create_user(username='admin_bad_student_client_filter', password='x', is_staff=True)
+        request = APIRequestFactory().get('/api/students/?client=abc')
+        force_authenticate(request, user=admin)
+        response = StudentViewSet.as_view({'get': 'list'})(request)
+        self.assertEqual(response.status_code, 400)
+
+
 class StudentProfileHiddenFromTrainerWhenArchivedTests(APITestCase):
     """A trainer shouldn't be able to reach an archived student's profile
     directly (e.g. a stale bookmark) any more than they can find them listed

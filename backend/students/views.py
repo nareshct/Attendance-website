@@ -111,6 +111,8 @@ class StudentViewSet(ModelViewSet):
         qs = super().get_queryset()
         client_id = self.request.query_params.get('client')
         if client_id:
+            if not client_id.isdigit():
+                raise serializers.ValidationError({'client': 'Invalid client filter.'})
             qs = qs.filter(client_id=client_id)
         status_param = self.request.query_params.get('status')
         if status_param:

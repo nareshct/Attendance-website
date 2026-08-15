@@ -4,6 +4,8 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
+from students.models import Student
+
 from .models import DAYS_OF_WEEK, Enrollment, PaymentInstallment, PaymentPlan, SubstituteAssignment
 from .services import (
     create_payment_plan,
@@ -167,6 +169,19 @@ class EnrollmentSerializer(serializers.ModelSerializer):
                 'This enrollment already has classes recorded, so its course can no longer be changed.'
             )
 
+        # Same reasoning as the course guard above — client_totals()/trainer_totals_for_range()
+        # read these live for every attendance row in range (an enrollment-specific override
+        # that wins over everything else, see their docstrings), not a per-class snapshot.
+        # Editing either after classes are already taught would retroactively re-bill/re-pay
+        # those past sessions at the new rate. Only allow it before any class has been recorded.
+        if self.instance is not None and self.instance.classes_completed > 0:
+            for field in ('trainer_rate_per_class', 'client_rate_per_class'):
+                if field in attrs and attrs[field] != getattr(self.instance, field):
+                    label = 'trainer rate' if field == 'trainer_rate_per_class' else 'client rate'
+                    raise serializers.ValidationError(
+                        f'This enrollment already has classes recorded, so its {label} can no longer be changed.'
+                    )
+
         student = attrs.get('student') or getattr(self.instance, 'student', None)
 
         client_rate_per_class = attrs.get('client_rate_per_class')
@@ -210,8 +225,10 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             validated_data['classes_total'] = validated_data['course'].total_classes
 
         # Both rates default to the trainer's/client's current rate for this course when
-        # not explicitly overridden on the form — a display snapshot only (see the model
-        # field comments), not consulted by payout/billing.
+        # not explicitly overridden on the form. Not a mere display snapshot — see the
+        # model field comments — this is the actual rate billing/payout math will use for
+        # every class taught on this enrollment, which is exactly why validate() blocks
+        # editing it again once classes_completed > 0.
         if validated_data.get('trainer_rate_per_class') is None:
             validated_data['trainer_rate_per_class'] = validated_data['trainer'].rate_for(validated_data['course'])
         if validated_data['student'].source_type == 'B2B' and validated_data.get('client_rate_per_class') is None:
@@ -219,13 +236,20 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             if client is not None:
                 validated_data['client_rate_per_class'] = client.rate_for(validated_data['course'])
 
-        existing = Enrollment.objects.filter(
-            student=validated_data['student'], course=validated_data['course']
-        ).count()
-        validated_data['batch_number'] = existing + 1
-        validated_data['start_date'] = timezone.localdate()
+        # Locked for the duration of this transaction so two concurrent enrollment
+        # creations for the same student can't both read the same existing count and
+        # be assigned the same batch_number — there's no existing Enrollment row to
+        # lock when this is the student's first enrollment in the course, so the lock
+        # is taken on the Student row itself, serializing creates for that student.
+        with transaction.atomic():
+            Student.objects.select_for_update().get(pk=validated_data['student'].pk)
+            existing = Enrollment.objects.filter(
+                student=validated_data['student'], course=validated_data['course']
+            ).count()
+            validated_data['batch_number'] = existing + 1
+            validated_data['start_date'] = timezone.localdate()
 
-        enrollment = super().create(validated_data)
+            enrollment = super().create(validated_data)
 
         if payment_type:
             total_amount = total_amount_for_discount(enrollment.course, enrollment.classes_total, discount_percent)

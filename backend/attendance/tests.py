@@ -75,6 +75,53 @@ class LateApprovalPricingTests(APITestCase):
         self.assertEqual(payout_adj.source_cycle, self.closed_cycle, 'but is attributed back to its real cycle')
 
 
+class ApprovalTargetCycleClosedRaceTests(APITestCase):
+    """Regression test for a race between AttendanceRequestViewSet.approve() and a
+    concurrent BillingCycleViewSet.close() on the same 'current' cycle a carried-
+    forward adjustment would be attributed to. Simulated here by pre-closing today's
+    cycle before calling approve() — same end state as if close() had won a race
+    against approve() for that row's lock. The whole approval must roll back (no
+    Attendance, no adjustment, request stays pending) rather than silently creating
+    an adjustment on a cycle whose Payout/ClientInvoice totals are already frozen."""
+
+    def setUp(self):
+        self.admin = _make_user('admin_approval_race', is_staff=True)
+        self.trainer = _make_trainer('trainer_approval_race', Decimal('100'))
+        self.course = Course.objects.create(name='Race Course', total_classes=24, rate_per_class=Decimal('300'))
+        self.student = Student.objects.create(name='Race Kid', grade='5', source_type='B2C')
+        self.enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        self.closed_cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='closed',
+        )
+        self.factory = APIRequestFactory()
+
+    def test_approval_rolls_back_if_the_target_cycle_was_just_closed(self):
+        # Simulates close() having already won the race: today's cycle exists and is
+        # already closed by the time approve() tries to attribute the adjustment to it.
+        current_cycle, _ = get_or_create_cycle()
+        current_cycle.status = 'closed'
+        current_cycle.save(update_fields=['status'])
+
+        req = AttendanceRequest.objects.create(
+            enrollment=self.enrollment, date=datetime.date(2026, 1, 5), topic_covered='late class',
+            requested_by=self.trainer, status='pending',
+        )
+        request = self.factory.post(f'/api/attendance-requests/{req.id}/approve/')
+        force_authenticate(request, user=self.admin)
+        response = AttendanceRequestViewSet.as_view({'post': 'approve'})(request, pk=req.id)
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(Attendance.objects.filter(enrollment=self.enrollment, date=datetime.date(2026, 1, 5)).exists())
+        self.assertFalse(PayoutAdjustment.objects.filter(source_cycle=self.closed_cycle).exists())
+        req.refresh_from_db()
+        self.assertEqual(req.status, 'pending')
+        self.enrollment.refresh_from_db()
+        self.assertEqual(self.enrollment.classes_completed, 0)
+
+
 class WithdrawnEnrollmentBlocksAttendanceTests(APITestCase):
     def test_cannot_mark_attendance_for_a_withdrawn_enrollment(self):
         trainer = _make_trainer('trainer2', Decimal('100'))
@@ -282,6 +329,42 @@ class DuplicatePendingAttendanceRequestTests(APITestCase):
         second = self._submit()
         self.assertEqual(second.status_code, 202)
         self.assertEqual(first.data['request']['id'], second.data['request']['id'])
+
+
+class StaffTrainerClosedCycleCreateTests(APITestCase):
+    """Regression test: a trainer account that also happens to be is_staff must not
+    be able to bypass the closed-cycle protection when creating attendance directly
+    — see AttendanceViewSet.create()'s comment ('applies to admins too, not just
+    trainers'), matching perform_update/perform_destroy's existing behavior for the
+    same check. Only IsTrainer gates create() at all, so user.trainer is always safe
+    to read here regardless of is_staff."""
+
+    def setUp(self):
+        user = get_user_model().objects.create_user(username='staff_trainer_closed_cycle', password='x', is_staff=True)
+        self.trainer = Trainer.objects.create(
+            user=user, name='Staff Trainer', phone_number='1', place='X', default_rate_per_class=Decimal('100'),
+        )
+        course = Course.objects.create(name='Staff Trainer Course', total_classes=24, rate_per_class=Decimal('300'))
+        student = Student.objects.create(name='Staff Trainer Kid', grade='5', source_type='B2C')
+        self.enrollment = Enrollment.objects.create(
+            student=student, course=course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='closed',
+        )
+        self.factory = APIRequestFactory()
+
+    def test_staff_trainer_still_routes_through_approval_for_a_closed_cycle_date(self):
+        request = self.factory.post('/api/attendance/', {
+            'enrollment': self.enrollment.id, 'date': '2026-01-05', 'topic_covered': 'late', 'status': 'present',
+        }, format='json')
+        force_authenticate(request, user=self.trainer.user)
+        response = AttendanceViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 202, response.data)
+        self.assertTrue(response.data['pending_approval'])
+        self.assertFalse(Attendance.objects.filter(enrollment=self.enrollment, date=datetime.date(2026, 1, 5)).exists())
         self.assertEqual(
             AttendanceRequest.objects.filter(enrollment=self.enrollment, date=datetime.date(2026, 1, 5)).count(), 1,
         )
