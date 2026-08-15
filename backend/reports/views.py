@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from attendance.models import Attendance
 from billing.models import Payout
 from clients.models import Client
-from config.permissions import IsAdmin
+from config.permissions import IsAdmin, IsClient, IsTrainer
 from enrollments.models import Enrollment
 
 
@@ -157,6 +157,88 @@ class ClientAttendanceReportView(APIView):
                 a.enrollment.student.student_id, a.enrollment.student.name,
                 a.enrollment.course.name, a.enrollment.batch_number,
                 a.date, csv_safe(a.topic_covered),
+            ])
+        return response
+
+
+class MyClientAttendanceReportView(APIView):
+    """GET /api/reports/my-client-attendance/?start=&end= — client-facing: CSV of
+    their own students' attendance for a billing cycle (both bounds inclusive) —
+    same shape as ClientAttendanceReportView, just self-scoped via
+    request.user.client instead of an admin-supplied client_id path param, so a
+    client can pull this for a specific invoice's/the current cycle's dates
+    (see ClientInvoicesPage.jsx) without needing admin access."""
+
+    permission_classes = [IsClient]
+
+    def get(self, request):
+        client = request.user.client
+        records = (
+            Attendance.objects.filter(status='present', enrollment__student__client=client)
+            .select_related('enrollment__student', 'enrollment__course')
+            .order_by('enrollment__student__name', 'date')
+        )
+
+        start = request.query_params.get('start')
+        end = request.query_params.get('end')
+        if not valid_date(start):
+            return bad_request('Invalid start date — use YYYY-MM-DD.')
+        if not valid_date(end):
+            return bad_request('Invalid end date — use YYYY-MM-DD.')
+        if start:
+            records = records.filter(date__gte=start)
+        if end:
+            records = records.filter(date__lte=end)
+
+        filename_suffix = f'-{start or "start"}_to_{end or "now"}' if (start or end) else ''
+        response = csv_response(f'{client.company_name}-attendance{filename_suffix}.csv')
+        writer = csv.writer(response)
+        writer.writerow(['Student ID', 'Student Name', 'Course', 'Batch', 'Date', 'Topic Covered'])
+        for a in records:
+            writer.writerow([
+                a.enrollment.student.student_id, a.enrollment.student.name,
+                a.enrollment.course.name, a.enrollment.batch_number,
+                a.date, csv_safe(a.topic_covered),
+            ])
+        return response
+
+
+class MyAttendanceReportView(APIView):
+    """GET /api/reports/my-attendance/?start=&end= — trainer-facing: CSV of their
+    own classes for a payout cycle (both bounds inclusive) — same shape as
+    AttendanceReportView minus the Trainer ID/Name columns (redundant — it's
+    always the caller), self-scoped via marked_by=request.user.trainer so a
+    trainer can pull this for a specific payout's dates (see
+    MyEarningsPage.jsx's Payout history table) without needing admin access."""
+
+    permission_classes = [IsTrainer]
+
+    def get(self, request):
+        records = (
+            Attendance.objects.filter(status='present', marked_by=request.user.trainer)
+            .select_related('enrollment__student', 'enrollment__course')
+            .order_by('date')
+        )
+
+        start = request.query_params.get('start')
+        end = request.query_params.get('end')
+        if not valid_date(start):
+            return bad_request('Invalid start date — use YYYY-MM-DD.')
+        if not valid_date(end):
+            return bad_request('Invalid end date — use YYYY-MM-DD.')
+        if start:
+            records = records.filter(date__gte=start)
+        if end:
+            records = records.filter(date__lte=end)
+
+        filename_suffix = f'-{start or "start"}_to_{end or "now"}' if (start or end) else ''
+        response = csv_response(f'{request.user.trainer.name}-classes{filename_suffix}.csv')
+        writer = csv.writer(response)
+        writer.writerow(['Date', 'Student ID', 'Student Name', 'Course', 'Batch', 'Topic Covered'])
+        for a in records:
+            writer.writerow([
+                a.date, a.enrollment.student.student_id, a.enrollment.student.name,
+                a.enrollment.course.name, a.enrollment.batch_number, csv_safe(a.topic_covered),
             ])
         return response
 

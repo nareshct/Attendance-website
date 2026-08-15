@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MinValueValidator
 from django.db import models
@@ -23,6 +24,13 @@ class Client(models.Model):
         ('archived', 'Archived'),
     ]
 
+    # Optional, unlike Trainer.user — a client is created without a login (as
+    # today) and an admin can grant portal access later via ClientViewSet's
+    # set_up_login action. hasattr(request.user, 'client') is how LoginView/
+    # MeView/IsClient resolve the 'client' role.
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='client',
+    )
     company_name = models.CharField(max_length=255)
     contact_phone = models.CharField(max_length=20)
     contact_email = models.EmailField(blank=True)

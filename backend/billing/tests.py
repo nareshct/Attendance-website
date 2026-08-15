@@ -16,16 +16,18 @@ from clients.services import client_totals
 from courses.models import Course
 from enrollments.models import Enrollment
 from enrollments.services import create_payment_plan
+from students.models import Student
 from trainers.models import Trainer
 
 from .invoice_pdf import render_invoice_pdf
-from .models import BillingCycle, ClientInvoice, CycleRevenueSnapshot, Payout
+from .models import BillingCycle, ClientInvoice, ClientInvoiceAdjustment, CycleRevenueSnapshot, Payout
 from .services import (
     b2c_totals_for_range,
     calculate_payouts_for_cycle,
     compute_admin_alerts,
     cycle_bounds_for_date,
     cycle_revenue_totals,
+    get_or_create_cycle,
     historical_rate,
     snapshot_cycle_revenue,
 )
@@ -35,6 +37,9 @@ from .views import (
     ClientInvoiceViewSet,
     CycleRevenueHistoryView,
     CycleRevenueView,
+    MyClientBillingHistoryView,
+    MyClientCurrentCycleView,
+    MyClientInvoiceViewSet,
     MyCurrentCycleView,
     MyEarningsView,
     PayoutViewSet,
@@ -972,3 +977,190 @@ class PayoutCancelTests(APITestCase):
 
         self.payout.refresh_from_db()
         self.assertEqual(self.payout.paid_status, 'cancelled')
+
+
+class MyClientInvoiceViewSetTests(APITestCase):
+    """Client-facing invoice access — see MyClientInvoiceViewSet. Must scope
+    strictly to request.user.client, unlike admin's ClientInvoiceViewSet which
+    accepts an arbitrary ?client= filter."""
+
+    def setUp(self):
+        self.client_a_user = get_user_model().objects.create_user(username='invoice_client_a', password='x')
+        self.client_a = Client.objects.create(
+            company_name='Invoice Client A', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_a_user,
+        )
+        self.client_b_user = get_user_model().objects.create_user(username='invoice_client_b', password='x')
+        self.client_b = Client.objects.create(
+            company_name='Invoice Client B', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_b_user,
+        )
+        cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 5, 1), cycle_end=datetime.date(2026, 5, 15), status='closed',
+        )
+        self.invoice_a = ClientInvoice.objects.create(
+            client=self.client_a, cycle=cycle, total_classes=5, total_amount=Decimal('1000.00'), status='pending',
+        )
+        self.invoice_b = ClientInvoice.objects.create(
+            client=self.client_b, cycle=cycle, total_classes=3, total_amount=Decimal('600.00'), status='pending',
+        )
+        self.factory = APIRequestFactory()
+
+    def test_client_only_sees_their_own_invoices(self):
+        request = self.factory.get('/api/my-client-invoices/')
+        force_authenticate(request, user=self.client_a_user)
+        response = MyClientInvoiceViewSet.as_view({'get': 'list'})(request)
+        self.assertEqual(response.status_code, 200)
+        ids = [row['id'] for row in response.data['results']]
+        self.assertEqual(ids, [self.invoice_a.id])
+
+    def test_client_cannot_retrieve_another_clients_invoice(self):
+        request = self.factory.get(f'/api/my-client-invoices/{self.invoice_b.id}/')
+        force_authenticate(request, user=self.client_a_user)
+        response = MyClientInvoiceViewSet.as_view({'get': 'retrieve'})(request, pk=self.invoice_b.id)
+        self.assertEqual(response.status_code, 404)
+
+    def test_client_cannot_download_another_clients_invoice_pdf(self):
+        request = self.factory.get(f'/api/my-client-invoices/{self.invoice_b.id}/pdf/')
+        force_authenticate(request, user=self.client_a_user)
+        response = MyClientInvoiceViewSet.as_view({'get': 'pdf'})(request, pk=self.invoice_b.id)
+        self.assertEqual(response.status_code, 404)
+
+    def test_client_can_download_their_own_invoice_pdf(self):
+        request = self.factory.get(f'/api/my-client-invoices/{self.invoice_a.id}/pdf/')
+        force_authenticate(request, user=self.client_a_user)
+        response = MyClientInvoiceViewSet.as_view({'get': 'pdf'})(request, pk=self.invoice_a.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+
+
+class MyClientCurrentCycleViewTests(APITestCase):
+    """The critical regression test for this feature: our own profit margin
+    (trainer_cost/our_earning) must never reach a client-facing response. See
+    MyClientCurrentCycleView's docstring and the KEEP/DROP list in the plan
+    that introduced it."""
+
+    def setUp(self):
+        self.trainer = _make_trainer('current_cycle_client_trainer', Decimal('100'))
+        self.course = Course.objects.create(name='Current Cycle Course', total_classes=24)
+        self.client_user = get_user_model().objects.create_user(username='current_cycle_client', password='x')
+        self.client_obj = Client.objects.create(
+            company_name='Current Cycle Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_user,
+        )
+        student = Student.objects.create(
+            name='Current Cycle Kid', grade='5', source_type='B2B', client=self.client_obj,
+        )
+        enrollment = Enrollment.objects.create(
+            student=student, course=self.course, trainer=self.trainer, start_date=datetime.date.today(),
+            class_time='10:00', class_days='MON',
+        )
+        Attendance.objects.create(enrollment=enrollment, date=datetime.date.today(), status='present', marked_by=self.trainer)
+        self.factory = APIRequestFactory()
+
+    def test_non_client_user_is_forbidden(self):
+        other_user = get_user_model().objects.create_user(username='not_a_client_for_billing', password='x')
+        request = self.factory.get('/api/my-client-billing/current/')
+        force_authenticate(request, user=other_user)
+        response = MyClientCurrentCycleView.as_view()(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_response_never_includes_margin_fields(self):
+        request = self.factory.get('/api/my-client-billing/current/')
+        force_authenticate(request, user=self.client_user)
+        response = MyClientCurrentCycleView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('our_earning', response.data)
+        self.assertNotIn('trainer_cost', response.data)
+        self.assertNotIn('current_earning', response.data)
+        self.assertNotIn('total_earning', response.data)
+        self.assertIn('billed_to_client', response.data)
+        self.assertIn('pending_amount', response.data)
+        self.assertIn('current_cycle_billed', response.data)
+        self.assertEqual(response.data['current_classes'], 1)
+        self.assertEqual(response.data['current_cycle_billed'], Decimal('200.00'))
+
+
+class MyClientBillingHistoryViewTests(APITestCase):
+    """Client-facing billing trend — see MyClientBillingHistoryView. Same margin-leak
+    regression concern as MyClientCurrentCycleView, applied per-cycle."""
+
+    def setUp(self):
+        self.trainer = _make_trainer('billing_history_client_trainer', Decimal('100'))
+        self.course = Course.objects.create(name='Billing History Course', total_classes=24)
+        self.client_user = get_user_model().objects.create_user(username='billing_history_client', password='x')
+        self.client_obj = Client.objects.create(
+            company_name='Billing History Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_user,
+        )
+        student = Student.objects.create(name='Billing History Kid', grade='5', source_type='B2B', client=self.client_obj)
+        enrollment = Enrollment.objects.create(
+            student=student, course=self.course, trainer=self.trainer, start_date=datetime.date.today(),
+            class_time='10:00', class_days='MON',
+        )
+        Attendance.objects.create(enrollment=enrollment, date=datetime.date.today(), status='present', marked_by=self.trainer)
+        # Unlike MyClientCurrentCycleView (which calls client_current_cycle_totals(client)
+        # with no cycle= arg, implicitly creating today's cycle via get_or_create_cycle()),
+        # this view only queries BillingCycle rows that already exist — so the test needs
+        # to ensure one does, same as production traffic would have already done by the
+        # time anyone visits a billing-history view.
+        get_or_create_cycle()
+        self.factory = APIRequestFactory()
+
+    def test_non_client_user_is_forbidden(self):
+        other_user = get_user_model().objects.create_user(username='not_a_client_for_billing_history', password='x')
+        request = self.factory.get('/api/my-client-billing/history/')
+        force_authenticate(request, user=other_user)
+        response = MyClientBillingHistoryView.as_view()(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_rejects_a_malformed_limit(self):
+        request = self.factory.get('/api/my-client-billing/history/?limit=abc')
+        force_authenticate(request, user=self.client_user)
+        response = MyClientBillingHistoryView.as_view()(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_response_never_includes_margin_fields(self):
+        request = self.factory.get('/api/my-client-billing/history/?limit=1')
+        force_authenticate(request, user=self.client_user)
+        response = MyClientBillingHistoryView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        row = response.data[0]
+        self.assertNotIn('our_earning', row)
+        self.assertNotIn('trainer_cost', row)
+        self.assertIn('total_revenue', row)
+        self.assertIn('total_classes', row)
+        self.assertEqual(row['total_classes'], 1)
+        self.assertEqual(row['total_revenue'], Decimal('200.00'))
+
+    def test_closed_cycle_includes_carried_forward_revenue(self):
+        """Regression test: a closed cycle's history row must include any
+        ClientInvoiceAdjustment applied to it (a late-approved class carried
+        forward from an earlier, already-closed cycle) — same amount the real
+        ClientInvoice for that cycle was actually generated with. Previously this
+        view called client_totals() directly for closed cycles, which excludes
+        carried-forward attendance entirely, under-reporting the cycle."""
+        source_cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 1), cycle_end=datetime.date(2026, 1, 15), status='closed',
+        )
+        applied_cycle = BillingCycle.objects.create(
+            cycle_start=datetime.date(2026, 1, 16), cycle_end=datetime.date(2026, 1, 31), status='closed',
+        )
+        carried_attendance = Attendance.objects.create(
+            enrollment=Enrollment.objects.create(
+                student=Student.objects.create(name='Carried Kid', grade='5', source_type='B2B', client=self.client_obj),
+                course=self.course, trainer=self.trainer, start_date=datetime.date(2026, 1, 1),
+                class_time='11:00', class_days='TUE',
+            ),
+            date=datetime.date(2026, 1, 10), status='present', marked_by=self.trainer,
+        )
+        ClientInvoiceAdjustment.objects.create(
+            client=self.client_obj, attendance=carried_attendance, source_cycle=source_cycle,
+            amount=Decimal('500.00'), trainer_cost=Decimal('250.00'), applied_cycle=applied_cycle,
+        )
+
+        request = self.factory.get('/api/my-client-billing/history/?limit=20')
+        force_authenticate(request, user=self.client_user)
+        response = MyClientBillingHistoryView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        row = next(r for r in response.data if r['cycle_start'] == applied_cycle.cycle_start)
+        self.assertEqual(row['total_revenue'], Decimal('500.00'))

@@ -33,6 +33,10 @@
   --color-teal-hover: #0c4a45;
   --color-teal-tint: #e9f5f3;
 
+  --color-client: #6b2d5c; /* client portal nav rail only — a third role, a third distinct accent */
+  --color-client-hover: #5a2549;
+  --color-client-tint: #f7eef4;
+
   /* --- Semantic status ---
      success = present/paid/completed/approved, warning = pending/open/
      incomplete, error = overdue/rejected/absent/denied/cancelled,

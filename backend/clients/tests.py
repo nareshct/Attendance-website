@@ -7,19 +7,28 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from PIL import Image as PILImage
-from rest_framework.test import APIRequestFactory, APITestCase, force_authenticate
+from rest_framework.test import APIClient, APIRequestFactory, APITestCase, force_authenticate
 
 from attendance.models import Attendance
 from audit.models import AuditLog
-from billing.models import BillingCycle, ClientInvoice
+from billing.models import BillingCycle, ClientInvoice, ClientInvoiceAdjustment
 from courses.models import Course
 from enrollments.models import Enrollment
 from students.models import Student
 from trainers.models import Trainer
 
+from config.models import AuthToken
+
 from .models import Client, validate_logo_size
 from .serializers import ClientSerializer
-from .views import ClientViewSet
+from .views import (
+    ClientContactViewSet,
+    ClientCourseRateViewSet,
+    ClientViewSet,
+    MyClientProfileView,
+    MyClientStudentDetailView,
+    MyClientStudentsView,
+)
 
 
 def _tiny_png(name='logo.png'):
@@ -51,6 +60,35 @@ class ClientRateValidationTests(APITestCase):
         serializer = ClientSerializer(data={'company_name': 'Bad Co', 'contact_phone': '123', 'rate_per_class': '-500.00'})
         self.assertFalse(serializer.is_valid())
         self.assertIn('rate_per_class', serializer.errors)
+
+
+class InvalidIntQueryParamsReturn400Tests(APITestCase):
+    """A non-numeric ?limit=/?client= previously went straight into int()/a queryset
+    filter with no validation, raising an unhandled ValueError (500) instead of a
+    clean 400 — mirrors TrainerCourseRateViewSet's existing ?trainer= guard."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_bad_query_params', password='x', is_staff=True)
+        self.client_obj = Client.objects.create(company_name='Bad Params Co', contact_phone='123', rate_per_class=Decimal('200'))
+        self.factory = APIRequestFactory()
+
+    def test_earnings_history_rejects_a_malformed_limit(self):
+        request = self.factory.get(f'/api/clients/{self.client_obj.id}/earnings-history/?limit=abc')
+        force_authenticate(request, user=self.admin)
+        response = ClientViewSet.as_view({'get': 'earnings_history'})(request, pk=self.client_obj.id)
+        self.assertEqual(response.status_code, 400)
+
+    def test_client_rates_rejects_a_malformed_client_filter(self):
+        request = self.factory.get('/api/client-rates/?client=abc')
+        force_authenticate(request, user=self.admin)
+        response = ClientCourseRateViewSet.as_view({'get': 'list'})(request)
+        self.assertEqual(response.status_code, 400)
+
+    def test_client_contacts_rejects_a_malformed_client_filter(self):
+        request = self.factory.get('/api/client-contacts/?client=abc')
+        force_authenticate(request, user=self.admin)
+        response = ClientContactViewSet.as_view({'get': 'list'})(request)
+        self.assertEqual(response.status_code, 400)
 
 
 class ClientLogoTaglineTests(APITestCase):
@@ -338,3 +376,353 @@ class ClientEarningsHistoryReopenedCycleTests(APITestCase):
         self.assertEqual(row['cycle_start'], past_start)
         self.assertEqual(row['total_classes'], 1)
         self.assertEqual(row['total_revenue'], Decimal('200.00'))
+
+    def test_closed_cycle_includes_carried_forward_revenue(self):
+        """Regression test: a closed cycle's history row must include any
+        ClientInvoiceAdjustment applied to it (a late-approved class carried
+        forward from an earlier, already-closed cycle) — same amount the real
+        ClientInvoice for that cycle was actually generated with. Previously this
+        action called client_totals() directly for closed cycles, which excludes
+        carried-forward attendance entirely, under-reporting the cycle. See
+        billing.tests.MyClientBillingHistoryViewTests's equivalent test for the
+        client-facing twin of this same view."""
+        admin = get_user_model().objects.create_user(username='admin_earnings_history_carried', password='x', is_staff=True)
+        trainer_user = get_user_model().objects.create_user(username='trainer_earnings_history_carried', password='x')
+        trainer = Trainer.objects.create(user=trainer_user, name='T Carried', phone_number='1', place='X', default_rate_per_class=Decimal('100'))
+        client_obj = Client.objects.create(company_name='Carried History Co', contact_phone='123', rate_per_class=Decimal('200'))
+        course = Course.objects.create(name='Carried History Course', total_classes=24)
+
+        source_cycle = BillingCycle.objects.create(cycle_start=date(2026, 1, 1), cycle_end=date(2026, 1, 15), status='closed')
+        applied_cycle = BillingCycle.objects.create(cycle_start=date(2026, 1, 16), cycle_end=date(2026, 1, 31), status='closed')
+        student = Student.objects.create(name='Carried History Kid', grade='5', source_type='B2B', client=client_obj)
+        enrollment = Enrollment.objects.create(
+            student=student, course=course, trainer=trainer, start_date=date(2026, 1, 1), class_time='10:00', class_days='MON',
+        )
+        carried_attendance = Attendance.objects.create(enrollment=enrollment, date=date(2026, 1, 10), status='present', marked_by=trainer)
+        ClientInvoiceAdjustment.objects.create(
+            client=client_obj, attendance=carried_attendance, source_cycle=source_cycle,
+            amount=Decimal('500.00'), trainer_cost=Decimal('250.00'), applied_cycle=applied_cycle,
+        )
+
+        factory = APIRequestFactory()
+        request = factory.get(f'/api/clients/{client_obj.id}/earnings-history/?limit=20')
+        force_authenticate(request, user=admin)
+        response = ClientViewSet.as_view({'get': 'earnings_history'})(request, pk=client_obj.id)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        row = next(r for r in response.data if r['cycle_start'] == applied_cycle.cycle_start)
+        self.assertEqual(row['total_revenue'], Decimal('500.00'))
+
+
+class ClientLoginProvisioningTests(APITestCase):
+    """Client login is optional and granted after the fact — see
+    ClientViewSet.set_up_login. Contrast with Trainer, where a login is
+    mandatory at creation."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_client_login', password='x', is_staff=True)
+        self.client_obj = Client.objects.create(company_name='Set Up Login Co', contact_phone='123', rate_per_class=Decimal('200'))
+        self.factory = APIRequestFactory()
+
+    def _set_up_login(self, username='client_user_1', password='ClientPass123!'):
+        request = self.factory.post(f'/api/clients/{self.client_obj.id}/set-up-login/', {
+            'username': username, 'password': password,
+        }, format='json')
+        force_authenticate(request, user=self.admin)
+        return ClientViewSet.as_view({'post': 'set_up_login'})(request, pk=self.client_obj.id)
+
+    def test_set_up_login_links_a_working_user_account(self):
+        response = self._set_up_login()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.client_obj.refresh_from_db()
+        self.assertIsNotNone(self.client_obj.user_id)
+        self.assertTrue(self.client_obj.user.check_password('ClientPass123!'))
+        self.assertTrue(response.data['has_login'])
+
+    def test_client_login_resolves_to_client_role(self):
+        from config.views import LoginView
+
+        self._set_up_login(username='client_role_check', password='ClientPass123!')
+        request = self.factory.post('/api/auth/login/', {'username': 'client_role_check', 'password': 'ClientPass123!'}, format='json')
+        response = LoginView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['role'], 'client')
+        self.assertEqual(response.data['name'], 'Set Up Login Co')
+
+    def test_missing_username_or_password_is_rejected(self):
+        request = self.factory.post(f'/api/clients/{self.client_obj.id}/set-up-login/', {'username': 'onlyusername'}, format='json')
+        force_authenticate(request, user=self.admin)
+        response = ClientViewSet.as_view({'post': 'set_up_login'})(request, pk=self.client_obj.id)
+        self.assertEqual(response.status_code, 400)
+        self.client_obj.refresh_from_db()
+        self.assertIsNone(self.client_obj.user_id)
+
+    def test_duplicate_username_is_rejected(self):
+        get_user_model().objects.create_user(username='taken_username', password='x')
+        request = self.factory.post(f'/api/clients/{self.client_obj.id}/set-up-login/', {
+            'username': 'taken_username', 'password': 'ClientPass123!',
+        }, format='json')
+        force_authenticate(request, user=self.admin)
+        response = ClientViewSet.as_view({'post': 'set_up_login'})(request, pk=self.client_obj.id)
+        self.assertEqual(response.status_code, 400)
+
+    def test_calling_set_up_login_again_once_linked_is_rejected(self):
+        self._set_up_login()
+        response = self._set_up_login(username='client_user_2')
+        self.assertEqual(response.status_code, 400)
+
+    def test_archived_client_cannot_be_granted_a_login(self):
+        self.client_obj.status = 'archived'
+        self.client_obj.save(update_fields=['status'])
+        response = self._set_up_login()
+        self.assertEqual(response.status_code, 400)
+        self.client_obj.refresh_from_db()
+        self.assertIsNone(self.client_obj.user_id)
+
+
+class ClientResetPasswordTests(APITestCase):
+    """Mirrors trainers.tests.TrainerResetPasswordTests — see ClientViewSet.reset_password."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(username='admin_client_reset_pw', password='x', is_staff=True)
+        self.user = get_user_model().objects.create_user(username='reset_me_client', password='oldpw12345')
+        self.client_obj = Client.objects.create(
+            company_name='Reset Me Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.user,
+        )
+        self.factory = APIRequestFactory()
+
+    def _reset(self, new_password='BrandNewPass456!'):
+        request = self.factory.post(f'/api/clients/{self.client_obj.id}/reset-password/', {
+            'new_password': new_password,
+        }, format='json')
+        force_authenticate(request, user=self.admin)
+        return ClientViewSet.as_view({'post': 'reset_password'})(request, pk=self.client_obj.id)
+
+    def test_reset_deletes_the_clients_existing_tokens(self):
+        token = AuthToken.objects.create(user=self.user)
+        response = self._reset()
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(AuthToken.objects.filter(key=token.key).exists())
+
+    def test_reset_is_written_to_the_audit_log(self):
+        self._reset()
+        self.assertTrue(AuditLog.objects.filter(action='client_reset_password').exists())
+
+    def test_reset_on_a_client_with_no_login_yet_fails_cleanly(self):
+        no_login_client = Client.objects.create(company_name='No Login Co', contact_phone='123', rate_per_class=Decimal('200'))
+        request = self.factory.post(f'/api/clients/{no_login_client.id}/reset-password/', {
+            'new_password': 'BrandNewPass456!',
+        }, format='json')
+        force_authenticate(request, user=self.admin)
+        response = ClientViewSet.as_view({'post': 'reset_password'})(request, pk=no_login_client.id)
+        self.assertEqual(response.status_code, 400)
+
+
+class ClientArchiveLoginTests(APITestCase):
+    """Mirrors trainers.tests.TrainerArchiveLoginTests — see ClientViewSet.archive/
+    unarchive's nullable-safe user.is_active guard (most clients have no login at all,
+    unlike Trainer where one is mandatory)."""
+
+    def _archive(self, client_obj, admin):
+        factory = APIRequestFactory()
+        request = factory.post(f'/api/clients/{client_obj.id}/archive/')
+        force_authenticate(request, user=admin)
+        return ClientViewSet.as_view({'post': 'archive'})(request, pk=client_obj.id)
+
+    def _unarchive(self, client_obj, admin):
+        factory = APIRequestFactory()
+        request = factory.post(f'/api/clients/{client_obj.id}/unarchive/')
+        force_authenticate(request, user=admin)
+        return ClientViewSet.as_view({'post': 'unarchive'})(request, pk=client_obj.id)
+
+    def test_archiving_a_client_with_a_login_deactivates_it_immediately(self):
+        admin = get_user_model().objects.create_user(username='admin_archive_client_login', password='x', is_staff=True)
+        user = get_user_model().objects.create_user(username='archive_me_client', password='pw12345')
+        client_obj = Client.objects.create(
+            company_name='Archive Login Co', contact_phone='123', rate_per_class=Decimal('200'), user=user,
+        )
+        token = AuthToken.objects.create(user=user)
+        api_client = APIClient()
+        api_client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+        self.assertEqual(api_client.get('/api/auth/me/').status_code, 200)
+
+        response = self._archive(client_obj, admin)
+
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+        self.assertEqual(api_client.get('/api/auth/me/').status_code, 401)
+
+    def test_unarchiving_reactivates_the_login(self):
+        admin = get_user_model().objects.create_user(username='admin_unarchive_client_login', password='x', is_staff=True)
+        user = get_user_model().objects.create_user(username='unarchive_me_client', password='pw12345')
+        client_obj = Client.objects.create(
+            company_name='Unarchive Login Co', contact_phone='123', rate_per_class=Decimal('200'), user=user,
+        )
+        self._archive(client_obj, admin)
+        response = self._unarchive(client_obj, admin)
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
+
+    def test_archiving_a_client_without_a_login_succeeds_cleanly(self):
+        """The common case — most clients never get a login at all (see
+        ClientLoginProvisioningTests) — must not crash on None.is_active."""
+        admin = get_user_model().objects.create_user(username='admin_archive_no_login', password='x', is_staff=True)
+        client_obj = Client.objects.create(company_name='No Login Archive Co', contact_phone='123', rate_per_class=Decimal('200'))
+
+        response = self._archive(client_obj, admin)
+
+        self.assertEqual(response.status_code, 200)
+        client_obj.refresh_from_db()
+        self.assertEqual(client_obj.status, 'archived')
+
+
+class MyClientProfileViewTests(APITestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username='profile_view_client', password='x')
+        self.client_obj = Client.objects.create(
+            company_name='Profile View Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.user,
+        )
+        self.factory = APIRequestFactory()
+
+    def test_non_client_user_is_forbidden(self):
+        other_user = get_user_model().objects.create_user(username='not_a_client_user', password='x')
+        request = self.factory.get('/api/my-client-profile/')
+        force_authenticate(request, user=other_user)
+        response = MyClientProfileView.as_view()(request)
+        self.assertEqual(response.status_code, 403)
+
+    def test_client_sees_their_own_profile(self):
+        request = self.factory.get('/api/my-client-profile/')
+        force_authenticate(request, user=self.user)
+        response = MyClientProfileView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['company_name'], 'Profile View Co')
+        # ClientSerializer must never leak margin fields even indirectly — this locks
+        # in that MyClientProfileView's direct reuse of it stays safe.
+        self.assertNotIn('our_earning', response.data)
+        self.assertNotIn('trainer_cost', response.data)
+
+
+class MyClientStudentsViewTests(APITestCase):
+    def setUp(self):
+        self.trainer_user = get_user_model().objects.create_user(username='students_view_trainer', password='x')
+        self.trainer = Trainer.objects.create(
+            user=self.trainer_user, name='Students View Trainer', phone_number='1', place='X', default_rate_per_class=Decimal('100'),
+        )
+        self.course = Course.objects.create(name='Students View Course', total_classes=24)
+
+        self.client_user = get_user_model().objects.create_user(username='students_view_client', password='x')
+        self.client_obj = Client.objects.create(
+            company_name='Students View Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_user,
+        )
+        self.other_client_user = get_user_model().objects.create_user(username='other_students_view_client', password='x')
+        self.other_client = Client.objects.create(
+            company_name='Other Students View Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.other_client_user,
+        )
+        self.factory = APIRequestFactory()
+
+    def _get(self, user):
+        request = self.factory.get('/api/my-client-students/')
+        force_authenticate(request, user=user)
+        return MyClientStudentsView.as_view()(request)
+
+    def test_client_only_sees_their_own_students(self):
+        Student.objects.create(name='My Kid', grade='5', source_type='B2B', client=self.client_obj)
+        Student.objects.create(name='Their Kid', grade='5', source_type='B2B', client=self.other_client)
+
+        response = self._get(self.client_user)
+
+        self.assertEqual(response.status_code, 200)
+        names = [row['name'] for row in response.data]
+        self.assertEqual(names, ['My Kid'])
+
+    def test_includes_both_active_and_archived_students_with_their_status(self):
+        Student.objects.create(name='Active Kid', grade='5', source_type='B2B', client=self.client_obj, status='active')
+        Student.objects.create(name='Archived Kid', grade='5', source_type='B2B', client=self.client_obj, status='archived')
+
+        response = self._get(self.client_user)
+
+        statuses = {row['name']: row['status'] for row in response.data}
+        self.assertEqual(statuses, {'Active Kid': 'active', 'Archived Kid': 'archived'})
+
+    def test_enrollment_student_shows_course_batch_and_progress(self):
+        student = Student.objects.create(name='Enrolled Kid', grade='5', source_type='B2B', client=self.client_obj)
+        Enrollment.objects.create(
+            student=student, course=self.course, trainer=self.trainer, start_date=date(2026, 1, 1),
+            class_time='10:00', class_days='MON', classes_completed=3, classes_total=24,
+        )
+
+        response = self._get(self.client_user)
+
+        row = response.data[0]
+        self.assertIn('Students View Course', row['course_batch'])
+        self.assertEqual(row['progress'], '3/24')
+
+    def test_batch_only_student_shows_no_fabricated_progress(self):
+        from batches.models import Batch, BatchEnrollment
+
+        student = Student.objects.create(name='Batch Kid', grade='5', source_type='B2B', client=self.client_obj)
+        batch = Batch.objects.create(
+            name='Batch View Batch', course=self.course, total_classes=10, fee_per_student=Decimal('1000'),
+            start_date=date(2026, 1, 1),
+        )
+        BatchEnrollment.objects.create(batch=batch, student=student, joined_date=date(2026, 1, 1))
+
+        response = self._get(self.client_user)
+
+        row = response.data[0]
+        self.assertIn('Batch View Batch', row['course_batch'])
+        self.assertIsNone(row['progress'])
+
+
+class MyClientStudentDetailViewTests(APITestCase):
+    def setUp(self):
+        self.trainer_user = get_user_model().objects.create_user(username='student_detail_trainer', password='x')
+        self.trainer = Trainer.objects.create(
+            user=self.trainer_user, name='Student Detail Trainer', phone_number='1', place='X', default_rate_per_class=Decimal('100'),
+        )
+        self.course = Course.objects.create(name='Student Detail Course', total_classes=24)
+
+        self.client_user = get_user_model().objects.create_user(username='student_detail_client', password='x')
+        self.client_obj = Client.objects.create(
+            company_name='Student Detail Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_user,
+        )
+        self.other_client_user = get_user_model().objects.create_user(username='other_student_detail_client', password='x')
+        self.other_client = Client.objects.create(
+            company_name='Other Student Detail Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.other_client_user,
+        )
+        self.factory = APIRequestFactory()
+
+    def _get(self, user, student_id):
+        request = self.factory.get(f'/api/my-client-students/{student_id}/')
+        force_authenticate(request, user=user)
+        return MyClientStudentDetailView.as_view()(request, student_id=student_id)
+
+    def test_client_can_view_their_own_student(self):
+        student = Student.objects.create(name='Detail Kid', grade='5', source_type='B2B', client=self.client_obj)
+        enrollment = Enrollment.objects.create(
+            student=student, course=self.course, trainer=self.trainer, start_date=date(2026, 1, 1),
+            class_time='10:00', class_days='MON', classes_completed=2, classes_total=24,
+        )
+        Attendance.objects.create(enrollment=enrollment, date=date(2026, 1, 5), status='present', marked_by=self.trainer, topic_covered='Loops')
+
+        response = self._get(self.client_user, student.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'Detail Kid')
+        row = response.data['enrollments'][0]
+        self.assertEqual(row['course_name'], 'Student Detail Course')
+        self.assertEqual(row['classes_completed'], 2)
+        self.assertEqual(row['recent_classes'][0]['topic_covered'], 'Loops')
+
+    def test_client_cannot_view_another_clients_student(self):
+        other_student = Student.objects.create(name='Not Mine', grade='5', source_type='B2B', client=self.other_client)
+        response = self._get(self.client_user, other_student.id)
+        self.assertEqual(response.status_code, 404)
+
+    def test_client_cannot_view_a_b2c_student(self):
+        b2c_student = Student.objects.create(name='B2C Kid', grade='5', source_type='B2C')
+        response = self._get(self.client_user, b2c_student.id)
+        self.assertEqual(response.status_code, 404)

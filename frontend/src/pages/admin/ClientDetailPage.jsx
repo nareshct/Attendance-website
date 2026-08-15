@@ -22,6 +22,8 @@ export default function ClientDetailPage() {
   const [client, setClient] = useState(null)
   const [students, setStudents] = useState([])
   const [enrollments, setEnrollments] = useState([])
+  const [batches, setBatches] = useState([])
+  const [batchEnrollments, setBatchEnrollments] = useState([])
   const [showActiveStudents, setShowActiveStudents] = useState(false)
   const [invoices, setInvoices] = useState([])
   const [currentCycle, setCurrentCycle] = useState(null)
@@ -50,6 +52,21 @@ export default function ClientDetailPage() {
   const [contactError, setContactError] = useState('')
   const [editingContactId, setEditingContactId] = useState(null)
 
+  // "Set up client login" (no user yet) vs "Reset password" (one already exists) —
+  // see client.has_login. Reset-password naming mirrors TrainerDetailPage.jsx's
+  // identical flow; login-setup is new since Trainer has no "not set up yet" case
+  // (a trainer's login is mandatory at creation).
+  const [showLoginForm, setShowLoginForm] = useState(false)
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+  const [loginError, setLoginError] = useState('')
+  const [settingUpLogin, setSettingUpLogin] = useState(false)
+
+  const [showResetForm, setShowResetForm] = useState(false)
+  const [resetForm, setResetForm] = useState({ new_password: '', confirm_password: '' })
+  const [resetError, setResetError] = useState('')
+  const [resetSuccess, setResetSuccess] = useState(false)
+  const [resetting, setResetting] = useState(false)
+
   const loadClient = useCallback(async () => {
     setClient(await api(`/api/clients/${id}/`))
   }, [api, id])
@@ -71,10 +88,56 @@ export default function ClientDetailPage() {
     api(`/api/students/?client=${id}`).then(setStudents).catch(() => {})
     api(`/api/enrollments/?client=${id}`).then(setEnrollments).catch(() => {})
     api('/api/courses/').then(setCourses).catch(() => {})
+    // Group batches have no ?client= filter (see BatchEnrollmentViewSet), so this walks
+    // every page of the full catalog and gets narrowed to this client's students below —
+    // same approach as StudentsPage.jsx's "Course/Batch" column.
+    api('/api/batches/').then(setBatches).catch(() => {})
+    async function loadAllBatchEnrollments() {
+      let page = 1
+      let all = []
+      for (;;) {
+        const data = await api(`/api/batch-enrollments/?page=${page}`, { raw: true })
+        all = all.concat(data.results)
+        if (!data.next) break
+        page += 1
+      }
+      setBatchEnrollments(all)
+    }
+    loadAllBatchEnrollments().catch(() => {})
     loadInvoices().catch((err) => setError(err.message))
     loadCurrentCycle().catch((err) => setError(err.message))
     loadHistory().catch((err) => setError(err.message))
   }, [api, id, loadClient, loadInvoices, loadCurrentCycle, loadHistory])
+
+  // One row per student in the table below — prefer their ongoing enrollment; among
+  // enrollments with the same status, the most recently started one wins. Mirrors
+  // StudentsPage.jsx's studentPrimaryEnrollment/studentPrimaryBatchEnrollment logic.
+  const studentPrimaryEnrollment = {}
+  for (const e of enrollments) {
+    const current = studentPrimaryEnrollment[e.student]
+    if (
+      !current ||
+      (e.status === 'ongoing' && current.status !== 'ongoing') ||
+      (e.status === current.status && e.start_date > current.start_date)
+    ) {
+      studentPrimaryEnrollment[e.student] = e
+    }
+  }
+
+  const batchesById = Object.fromEntries(batches.map((b) => [b.id, b]))
+  const clientStudentIds = new Set(students.map((s) => s.id))
+  const studentPrimaryBatchEnrollment = {}
+  for (const be of batchEnrollments) {
+    if (!clientStudentIds.has(be.student)) continue
+    const current = studentPrimaryBatchEnrollment[be.student]
+    if (
+      !current ||
+      (be.status === 'active' && current.status !== 'active') ||
+      (be.status === current.status && be.joined_date > current.joined_date)
+    ) {
+      studentPrimaryBatchEnrollment[be.student] = be
+    }
+  }
 
   async function handleDownloadInvoice(invoiceId) {
     setDownloadingId(invoiceId)
@@ -260,6 +323,53 @@ export default function ClientDetailPage() {
     }
   }
 
+  function closeLoginForm() {
+    setShowLoginForm(false)
+    setLoginForm({ username: '', password: '' })
+    setLoginError('')
+  }
+
+  async function handleSetUpLogin(e) {
+    e.preventDefault()
+    setLoginError('')
+    setSettingUpLogin(true)
+    try {
+      await api(`/api/clients/${id}/set-up-login/`, { method: 'POST', body: loginForm })
+      setLoginForm({ username: '', password: '' })
+      setShowLoginForm(false)
+      await loadClient()
+    } catch (err) {
+      setLoginError(err.message)
+    } finally {
+      setSettingUpLogin(false)
+    }
+  }
+
+  async function handleResetPassword(e) {
+    e.preventDefault()
+    setResetError('')
+    setResetSuccess(false)
+
+    if (resetForm.new_password !== resetForm.confirm_password) {
+      setResetError('New password and confirmation do not match.')
+      return
+    }
+
+    setResetting(true)
+    try {
+      await api(`/api/clients/${id}/reset-password/`, {
+        method: 'POST',
+        body: { new_password: resetForm.new_password },
+      })
+      setResetForm({ new_password: '', confirm_password: '' })
+      setResetSuccess(true)
+    } catch (err) {
+      setResetError(err.message)
+    } finally {
+      setResetting(false)
+    }
+  }
+
   if (error && !client) return <p className="text-error text-sm">{error}</p>
   if (!client) return <p className="text-text-tertiary text-sm">Loading…</p>
 
@@ -331,6 +441,66 @@ export default function ClientDetailPage() {
               ))}
             </ul>
           </div>
+        )}
+
+        {!client.has_login ? (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            {client.status === 'archived' ? (
+              <p className="text-xs text-text-tertiary">Unarchive this client to set up a login.</p>
+            ) : (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setShowLoginForm(true)
+                  setLoginError('')
+                }}
+              >
+                Set up client login
+              </Button>
+            )}
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={() => {
+                setShowResetForm((v) => !v)
+                setResetError('')
+                setResetSuccess(false)
+              }}
+              className="mt-4 pt-4 border-t border-gray-100 block text-xs font-medium text-primary hover:underline focus-ring"
+            >
+              {showResetForm ? 'Cancel' : 'Reset client login password'}
+            </button>
+
+            {showResetForm && (
+              <form onSubmit={handleResetPassword} className="mt-3 pt-3 border-t border-gray-100 space-y-3 max-w-xs">
+                <input
+                  required
+                  type="password"
+                  placeholder="New password"
+                  autoComplete="new-password"
+                  value={resetForm.new_password}
+                  onChange={(e) => setResetForm({ ...resetForm, new_password: e.target.value })}
+                  className="input"
+                />
+                <input
+                  required
+                  type="password"
+                  placeholder="Confirm new password"
+                  autoComplete="new-password"
+                  value={resetForm.confirm_password}
+                  onChange={(e) => setResetForm({ ...resetForm, confirm_password: e.target.value })}
+                  className="input"
+                />
+                {resetError && <p className="text-xs text-error">{resetError}</p>}
+                {resetSuccess && <p className="text-xs text-success">Password reset successfully.</p>}
+                <Button disabled={resetting} type="submit">
+                  {resetting ? 'Saving…' : 'Save new password'}
+                </Button>
+              </form>
+            )}
+          </>
         )}
       </Card>
 
@@ -552,6 +722,38 @@ export default function ClientDetailPage() {
         })()}
       </Modal>
 
+      <Modal open={showLoginForm} onClose={closeLoginForm} title="Set up client login">
+        <form onSubmit={handleSetUpLogin} className="space-y-3">
+          <input
+            required
+            placeholder="Login username"
+            autoComplete="username"
+            autoFocus
+            value={loginForm.username}
+            onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+            className="input"
+          />
+          <input
+            required
+            type="password"
+            placeholder="Login password"
+            autoComplete="new-password"
+            value={loginForm.password}
+            onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+            className="input"
+          />
+          {loginError && <p className="text-xs text-error">{loginError}</p>}
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="ghost" onClick={closeLoginForm}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="success" disabled={settingUpLogin}>
+              {settingUpLogin ? 'Saving…' : 'Grant portal access'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
       {client.rate_per_class == null && (
         <p className="text-sm text-warning mb-3">Set a rate per class above to calculate billing and earnings for this client.</p>
       )}
@@ -660,8 +862,8 @@ export default function ClientDetailPage() {
               <th className="table-head-cell">#</th>
               <th className="table-head-cell">Student ID</th>
               <th className="table-head-cell">Name</th>
-              <th className="table-head-cell">Grade</th>
-              <th className="table-head-cell">Status</th>
+              <th className="table-head-cell">Course/Batch</th>
+              <th className="table-head-cell">Progress</th>
             </tr>
           </thead>
           <tbody>
@@ -678,8 +880,24 @@ export default function ClientDetailPage() {
                     {s.name}
                   </Link>
                 </td>
-                <td className="table-cell">Std {s.grade}</td>
-                <td className="table-cell"><Badge status={s.status} /></td>
+                <td className="table-cell">
+                  {studentPrimaryEnrollment[s.id] ? (
+                    `${studentPrimaryEnrollment[s.id].course_name} — Batch ${studentPrimaryEnrollment[s.id].batch_number}`
+                  ) : studentPrimaryBatchEnrollment[s.id] ? (
+                    `${batchesById[studentPrimaryBatchEnrollment[s.id].batch]?.course_name || '—'} — ${batchesById[studentPrimaryBatchEnrollment[s.id].batch]?.name || 'batch'}`
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td className="table-cell tabular-nums">
+                  {studentPrimaryEnrollment[s.id] ? (
+                    `${studentPrimaryEnrollment[s.id].classes_completed}/${studentPrimaryEnrollment[s.id].classes_total}`
+                  ) : studentPrimaryBatchEnrollment[s.id] ? (
+                    <span className="text-text-tertiary text-xs">not tracked per student</span>
+                  ) : (
+                    '—'
+                  )}
+                </td>
               </tr>
             ))}
             {students.length === 0 && (

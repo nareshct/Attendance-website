@@ -16,8 +16,16 @@ from trainers.models import Trainer
 from .certificate_pdf import render_certificate_pdf
 from .models import Enrollment, SubstituteAssignment
 from .report_pdf import render_student_report_pdf
+from .serializers import EnrollmentSerializer
 from .services import create_payment_plan, trainer_payment_gate, upfront_payment_for
-from .views import EnrollmentViewSet, MyStudentsView, PaymentInstallmentViewSet
+from .views import (
+    EnrollmentViewSet,
+    MyClientEnrollmentCertificateView,
+    MyClientEnrollmentReportView,
+    MyClientEnrollmentsView,
+    MyStudentsView,
+    PaymentInstallmentViewSet,
+)
 
 
 def _make_trainer(username='trainer'):
@@ -867,3 +875,229 @@ class SubstituteTrainerReportCertificateAccessTests(APITestCase):
         response = self._get('certificate', self.substitute.user)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
+
+
+class MyClientEnrollmentReportViewTests(APITestCase):
+    """Client-facing progress-report download — see MyClientEnrollmentReportView."""
+
+    def setUp(self):
+        trainer_user = get_user_model().objects.create_user(username='client_report_trainer', password='x')
+        self.trainer = Trainer.objects.create(
+            user=trainer_user, name='Client Report Trainer', phone_number='1', place='X', default_rate_per_class=Decimal('100'),
+        )
+        self.course = Course.objects.create(name='Client Report Course', total_classes=24)
+
+        self.client_user = get_user_model().objects.create_user(username='client_report_client', password='x')
+        self.client_obj = Client.objects.create(
+            company_name='Client Report Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_user,
+        )
+        self.other_client_user = get_user_model().objects.create_user(username='other_client_report_client', password='x')
+        self.other_client = Client.objects.create(
+            company_name='Other Client Report Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.other_client_user,
+        )
+
+        self.student = Student.objects.create(name='Report Kid', grade='5', source_type='B2B', client=self.client_obj)
+        self.enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer, start_date=datetime.date(2026, 1, 1),
+            class_time='10:00', class_days='MON',
+        )
+        self.factory = APIRequestFactory()
+
+    def _get(self, user):
+        request = self.factory.get(f'/api/my-client-enrollments/{self.enrollment.id}/report/')
+        force_authenticate(request, user=user)
+        return MyClientEnrollmentReportView.as_view()(request, pk=self.enrollment.id)
+
+    def test_client_can_download_their_own_students_report(self):
+        response = self._get(self.client_user)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+
+    def test_client_cannot_download_another_clients_student_report(self):
+        response = self._get(self.other_client_user)
+        self.assertEqual(response.status_code, 404)
+
+    def test_non_client_user_is_forbidden(self):
+        stranger = get_user_model().objects.create_user(username='client_report_stranger', password='x')
+        response = self._get(stranger)
+        self.assertEqual(response.status_code, 403)
+
+
+class MyClientEnrollmentsViewTests(APITestCase):
+    """Client-facing full enrollments list — see MyClientEnrollmentsView."""
+
+    def setUp(self):
+        trainer_user = get_user_model().objects.create_user(username='client_enrollments_trainer', password='x')
+        self.trainer = Trainer.objects.create(
+            user=trainer_user, name='Client Enrollments Trainer', phone_number='1', place='X', default_rate_per_class=Decimal('100'),
+        )
+        self.course = Course.objects.create(name='Client Enrollments Course', total_classes=24)
+
+        self.client_user = get_user_model().objects.create_user(username='client_enrollments_client', password='x')
+        self.client_obj = Client.objects.create(
+            company_name='Client Enrollments Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_user,
+        )
+        self.other_client_user = get_user_model().objects.create_user(username='other_client_enrollments_client', password='x')
+        self.other_client = Client.objects.create(
+            company_name='Other Client Enrollments Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.other_client_user,
+        )
+        self.factory = APIRequestFactory()
+
+    def _get(self, user):
+        request = self.factory.get('/api/my-client-enrollments/')
+        force_authenticate(request, user=user)
+        return MyClientEnrollmentsView.as_view()(request)
+
+    def test_non_client_user_is_forbidden(self):
+        stranger = get_user_model().objects.create_user(username='client_enrollments_stranger', password='x')
+        response = self._get(stranger)
+        self.assertEqual(response.status_code, 403)
+
+    def test_client_only_sees_their_own_students_enrollments(self):
+        mine = Student.objects.create(name='Mine', grade='5', source_type='B2B', client=self.client_obj)
+        theirs = Student.objects.create(name='Theirs', grade='5', source_type='B2B', client=self.other_client)
+        Enrollment.objects.create(
+            student=mine, course=self.course, trainer=self.trainer, start_date=datetime.date(2026, 1, 1),
+            class_time='10:00', class_days='MON',
+        )
+        Enrollment.objects.create(
+            student=theirs, course=self.course, trainer=self.trainer, start_date=datetime.date(2026, 1, 1),
+            class_time='10:00', class_days='MON',
+        )
+
+        response = self._get(self.client_user)
+
+        names = [row['student_name'] for row in response.data]
+        self.assertEqual(names, ['Mine'])
+
+    def test_response_never_includes_rate_fields(self):
+        student = Student.objects.create(name='Rate Check Kid', grade='5', source_type='B2B', client=self.client_obj)
+        Enrollment.objects.create(
+            student=student, course=self.course, trainer=self.trainer, start_date=datetime.date(2026, 1, 1),
+            class_time='10:00', class_days='MON',
+        )
+
+        response = self._get(self.client_user)
+
+        row = response.data[0]
+        self.assertNotIn('trainer_rate_per_class', row)
+        self.assertNotIn('client_rate_per_class', row)
+        self.assertIn('status', row)
+        self.assertIn('course_name', row)
+
+    def test_includes_every_status_not_just_ongoing(self):
+        student = Student.objects.create(name='Status Check Kid', grade='5', source_type='B2B', client=self.client_obj)
+        Enrollment.objects.create(
+            student=student, course=self.course, trainer=self.trainer, start_date=datetime.date(2026, 1, 1),
+            class_time='10:00', class_days='MON', status='completed',
+        )
+
+        response = self._get(self.client_user)
+
+        self.assertEqual(response.data[0]['status'], 'completed')
+
+
+class MyClientEnrollmentCertificateViewTests(APITestCase):
+    """Client-facing certificate download — see MyClientEnrollmentCertificateView."""
+
+    def setUp(self):
+        trainer_user = get_user_model().objects.create_user(username='client_cert_trainer', password='x')
+        self.trainer = Trainer.objects.create(
+            user=trainer_user, name='Client Cert Trainer', phone_number='1', place='X', default_rate_per_class=Decimal('100'),
+        )
+        self.course = Course.objects.create(name='Client Cert Course', total_classes=24)
+
+        self.client_user = get_user_model().objects.create_user(username='client_cert_client', password='x')
+        self.client_obj = Client.objects.create(
+            company_name='Client Cert Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.client_user,
+        )
+        self.other_client_user = get_user_model().objects.create_user(username='other_client_cert_client', password='x')
+        self.other_client = Client.objects.create(
+            company_name='Other Client Cert Co', contact_phone='123', rate_per_class=Decimal('200'), user=self.other_client_user,
+        )
+
+        self.student = Student.objects.create(name='Cert Kid', grade='5', source_type='B2B', client=self.client_obj)
+        self.enrollment = Enrollment.objects.create(
+            student=self.student, course=self.course, trainer=self.trainer, start_date=datetime.date(2026, 1, 1),
+            class_time='10:00', class_days='MON', status='completed',
+        )
+        self.factory = APIRequestFactory()
+
+    def _get(self, user, enrollment_id):
+        request = self.factory.get(f'/api/my-client-enrollments/{enrollment_id}/certificate/')
+        force_authenticate(request, user=user)
+        return MyClientEnrollmentCertificateView.as_view()(request, pk=enrollment_id)
+
+    def test_client_can_download_their_own_students_certificate(self):
+        response = self._get(self.client_user, self.enrollment.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+
+    def test_certificate_unavailable_until_completed(self):
+        self.enrollment.status = 'ongoing'
+        self.enrollment.save(update_fields=['status'])
+        response = self._get(self.client_user, self.enrollment.id)
+        self.assertEqual(response.status_code, 400)
+
+    def test_client_cannot_download_another_clients_certificate(self):
+        response = self._get(self.other_client_user, self.enrollment.id)
+        self.assertEqual(response.status_code, 404)
+
+    def test_non_client_user_is_forbidden(self):
+        stranger = get_user_model().objects.create_user(username='client_cert_stranger', password='x')
+        response = self._get(stranger, self.enrollment.id)
+        self.assertEqual(response.status_code, 403)
+
+
+class EnrollmentRateChangeGuardTests(TestCase):
+    """trainer_rate_per_class/client_rate_per_class are read live by every revenue/
+    payout calculation for every already-taught class on this enrollment (see the
+    model field comment) — editing either after classes are recorded would
+    retroactively re-bill/re-pay those past sessions. Same guard shape as the
+    course-change block right above it in EnrollmentSerializer.validate()."""
+
+    def setUp(self):
+        self.trainer = _make_trainer('rate_guard_trainer')
+        self.client_obj = Client.objects.create(company_name='Rate Guard Co', contact_phone='123', rate_per_class=Decimal('200'))
+        self.course = Course.objects.create(name='Rate Guard Course', total_classes=24)
+        self.b2b_student = Student.objects.create(name='Rate Guard Kid', grade='5', source_type='B2B', client=self.client_obj)
+        self.enrollment = Enrollment.objects.create(
+            student=self.b2b_student, course=self.course, trainer=self.trainer,
+            start_date=datetime.date(2026, 1, 1), class_time='10:00', class_days='MON',
+            trainer_rate_per_class=Decimal('100'), client_rate_per_class=Decimal('200'),
+        )
+
+    def test_trainer_rate_cannot_change_once_classes_recorded(self):
+        self.enrollment.classes_completed = 1
+        self.enrollment.save(update_fields=['classes_completed'])
+
+        serializer = EnrollmentSerializer(
+            instance=self.enrollment, data={'trainer_rate_per_class': '150.00'}, partial=True,
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('no longer be changed', str(serializer.errors))
+
+    def test_client_rate_cannot_change_once_classes_recorded(self):
+        self.enrollment.classes_completed = 1
+        self.enrollment.save(update_fields=['classes_completed'])
+
+        serializer = EnrollmentSerializer(
+            instance=self.enrollment, data={'client_rate_per_class': '250.00'}, partial=True,
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('no longer be changed', str(serializer.errors))
+
+    def test_rate_can_still_be_corrected_before_any_class_is_taught(self):
+        serializer = EnrollmentSerializer(
+            instance=self.enrollment, data={'trainer_rate_per_class': '150.00'}, partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_saving_other_fields_without_touching_rate_is_unaffected(self):
+        self.enrollment.classes_completed = 1
+        self.enrollment.save(update_fields=['classes_completed'])
+
+        serializer = EnrollmentSerializer(
+            instance=self.enrollment, data={'trainer_rate_per_class': '100.00'}, partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)

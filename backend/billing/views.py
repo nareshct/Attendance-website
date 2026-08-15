@@ -1,15 +1,18 @@
 import re
+from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Sum
 from django.http import HttpResponse
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from audit.services import log_action
-from config.permissions import IsAdmin, IsTrainer
+from config.permissions import IsAdmin, IsClient, IsTrainer
 
 from .invoice_pdf import render_invoice_pdf
 from .models import BillingCycle, ClientInvoice, CycleRevenueSnapshot, Payout
@@ -17,6 +20,7 @@ from .serializers import BillingCycleSerializer, ClientInvoiceSerializer, Payout
 from .services import (
     calculate_client_invoices_for_cycle,
     calculate_payouts_for_cycle,
+    client_current_cycle_totals,
     client_invoices_with_carried_forward,
     compute_admin_alerts,
     current_cycle_summary,
@@ -161,6 +165,101 @@ class ClientInvoiceViewSet(ReadOnlyModelViewSet):
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+
+
+class MyClientInvoiceViewSet(ReadOnlyModelViewSet):
+    """Client-facing: their own invoices only — same shape as ClientInvoiceViewSet,
+    scoped to request.user.client instead of admin's ?client= convenience filter."""
+
+    serializer_class = ClientInvoiceSerializer
+    permission_classes = [IsClient]
+
+    def get_queryset(self):
+        qs = ClientInvoice.objects.select_related('client', 'cycle').filter(
+            client=self.request.user.client
+        ).order_by('-cycle__cycle_start')
+        return client_invoices_with_carried_forward(qs)
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        # get_queryset above already scopes to this client's own invoices, so another
+        # client's invoice id 404s here rather than ever reaching render_invoice_pdf.
+        invoice = self.get_object()
+        pdf_bytes = render_invoice_pdf(invoice)
+
+        slug = re.sub(r'[^A-Za-z0-9]+', '-', invoice.client.company_name).strip('-').lower()
+        filename = f'invoice-{slug}-{invoice.cycle.cycle_start}.pdf'
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
+class MyClientCurrentCycleView(APIView):
+    """Client-facing: their own live current-cycle billing. Deliberately NOT a thin
+    wrapper around ClientViewSet.earnings — that response includes trainer_cost/
+    our_earning (the business's own profit margin on this client), which must never
+    reach the client themselves. Only revenue-side fields (what they're billed) are
+    included here.
+    """
+
+    permission_classes = [IsClient]
+
+    def get(self, request):
+        client = request.user.client
+        current = client_current_cycle_totals(client)
+        pending_amount = ClientInvoice.objects.filter(
+            client=client, status='pending', cycle__status='closed',
+        ).aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
+
+        return Response({
+            'cycle_start': current['cycle_start'],
+            'cycle_end': current['cycle_end'],
+            'current_classes': current['total_classes'],
+            'current_cycle_billed': current['total_revenue'],
+            'carried_forward_amount': current['carried_forward_amount'],
+            'carried_forward_count': current['carried_forward_count'],
+            'pending_amount': pending_amount,
+            'billed_to_client': current['total_revenue'] + pending_amount,
+        })
+
+
+class MyClientBillingHistoryView(APIView):
+    """Client-facing: per-cycle classes/revenue for the last N cycles (chronological),
+    for a trend chart — same shape as ClientViewSet.earnings_history but with
+    our_earning (our profit margin) dropped, for the same reason as
+    MyClientCurrentCycleView above."""
+
+    permission_classes = [IsClient]
+
+    def get(self, request):
+        client = request.user.client
+        limit_param = request.query_params.get('limit', '12')
+        if not limit_param.isdigit():
+            raise DRFValidationError({'limit': 'Invalid limit — must be a positive integer.'})
+        limit = int(limit_param)
+
+        cycles = list(BillingCycle.objects.order_by('-cycle_start')[:limit])
+        cycles.reverse()
+
+        history = []
+        for cycle in cycles:
+            # client_current_cycle_totals works for any cycle you pass it, not just the
+            # live "current" one — and unlike client_totals(), it folds in any
+            # ClientInvoiceAdjustment already assigned to this cycle (a late-approved
+            # class carried forward from an earlier, already-closed cycle). Using
+            # client_totals() directly for closed cycles here would under-report any
+            # cycle that received a carried-forward adjustment, out of step with the
+            # real ClientInvoice.total_amount that was actually sent for it.
+            totals = client_current_cycle_totals(client, cycle=cycle)
+            history.append({
+                'cycle_start': cycle.cycle_start,
+                'cycle_end': cycle.cycle_end,
+                'status': cycle.status,
+                'total_classes': totals['total_classes'],
+                'total_revenue': totals['total_revenue'],
+            })
+        return Response(history)
 
 
 class PayoutViewSet(ReadOnlyModelViewSet):

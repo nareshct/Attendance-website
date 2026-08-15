@@ -32,6 +32,12 @@ import MyEarningsPage from './pages/trainer/MyEarningsPage'
 import TrainerCourseMaterialsPage from './pages/trainer/CourseMaterialsPage'
 import TrainerStudentProfilePage from './pages/trainer/StudentProfilePage'
 import TrainerBatchesPage from './pages/trainer/BatchesPage'
+import ClientDashboard from './pages/client/ClientDashboard'
+import ClientStudentsPage from './pages/client/ClientStudentsPage'
+import ClientStudentProfilePage from './pages/client/StudentProfilePage'
+import ClientEnrollmentsPage from './pages/client/ClientEnrollmentsPage'
+import ClientInvoicesPage from './pages/client/ClientInvoicesPage'
+import ClientProfilePage from './pages/client/ClientProfilePage'
 
 const ADMIN_NAV = [
   { to: '/admin', label: 'Dashboard', end: true },
@@ -55,6 +61,14 @@ const TRAINER_NAV = [
   { to: '/trainer/my-batches', label: 'My Batches' },
   { to: '/trainer/my-earnings', label: 'My Earnings' },
   { to: '/trainer/course-materials', label: 'Course Materials' },
+]
+
+const CLIENT_NAV = [
+  { to: '/client', label: 'Dashboard', end: true },
+  { to: '/client/students', label: 'My Students' },
+  { to: '/client/enrollments', label: 'Enrollments' },
+  { to: '/client/invoices', label: 'Invoices' },
+  { to: '/client/profile', label: 'Profile' },
 ]
 
 function TrainerShell() {
@@ -129,6 +143,23 @@ export default function App() {
             <Route path="my-batches" element={<TrainerBatchesPage />} />
             <Route path="my-earnings" element={<MyEarningsPage />} />
             <Route path="course-materials" element={<TrainerCourseMaterialsPage />} />
+            <Route path="change-password" element={<ChangePasswordPage />} />
+          </Route>
+
+          <Route
+            path="/client"
+            element={
+              <ProtectedRoute role="client">
+                <Layout title="Client" navItems={CLIENT_NAV} accentClass="bg-client" />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<ClientDashboard />} />
+            <Route path="students" element={<ClientStudentsPage />} />
+            <Route path="students/:id" element={<ClientStudentProfilePage />} />
+            <Route path="enrollments" element={<ClientEnrollmentsPage />} />
+            <Route path="invoices" element={<ClientInvoicesPage />} />
+            <Route path="profile" element={<ClientProfilePage />} />
             <Route path="change-password" element={<ChangePasswordPage />} />
           </Route>
 

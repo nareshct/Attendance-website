@@ -9,12 +9,13 @@ from django.utils import timezone
 from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, PermissionDenied
-from rest_framework.generics import ListAPIView
+from rest_framework.generics import ListAPIView, get_object_or_404
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
 from audit.services import log_action
-from config.permissions import IsAdmin, IsAdminOrTrainer, IsTrainer
+from config.permissions import IsAdmin, IsAdminOrTrainer, IsClient, IsTrainer
 from trainers.models import Trainer
 
 from .certificate_pdf import render_certificate_pdf
@@ -115,11 +116,7 @@ class EnrollmentViewSet(ModelViewSet):
         original plan stays visible for the record) with an optional refund
         amount/note logged against it.
         """
-        enrollment = self.get_object()
-        if enrollment.status != 'ongoing':
-            return Response(
-                {'detail': 'Only ongoing enrollments can be withdrawn.'}, status=status.HTTP_400_BAD_REQUEST
-            )
+        self.get_object()  # 404 if missing, runs the standard permission checks
 
         refund_amount = request.data.get('refund_amount')
         refund_note = (request.data.get('refund_note') or '').strip()
@@ -133,20 +130,30 @@ class EnrollmentViewSet(ModelViewSet):
         else:
             refund_amount = None
 
-        enrollment.status = 'withdrawn'
-        enrollment.save(update_fields=['status'])
+        # Locked for the duration of this transaction so two concurrent "withdraw"
+        # clicks can't both pass the status check before either writes — see
+        # BillingCycleViewSet.close() for the same pattern.
+        with transaction.atomic():
+            enrollment = Enrollment.objects.select_related('student', 'course').select_for_update().get(pk=pk)
+            if enrollment.status != 'ongoing':
+                return Response(
+                    {'detail': 'Only ongoing enrollments can be withdrawn.'}, status=status.HTTP_400_BAD_REQUEST
+                )
 
-        detail = f'{enrollment.student.name} — {enrollment.course.name}'
-        plan = getattr(enrollment, 'payment_plan', None)
-        if plan is not None:
-            cancelled = plan.installments.filter(paid_status='pending').update(paid_status='cancelled')
-            if refund_amount is not None:
-                plan.refunded_amount = refund_amount
-                plan.refund_note = refund_note
-                plan.save(update_fields=['refunded_amount', 'refund_note'])
-                detail += f' — refunded ₹{refund_amount}'
-            if cancelled:
-                detail += f' — {cancelled} pending installment(s) cancelled'
+            enrollment.status = 'withdrawn'
+            enrollment.save(update_fields=['status'])
+
+            detail = f'{enrollment.student.name} — {enrollment.course.name}'
+            plan = getattr(enrollment, 'payment_plan', None)
+            if plan is not None:
+                cancelled = plan.installments.filter(paid_status='pending').update(paid_status='cancelled')
+                if refund_amount is not None:
+                    plan.refunded_amount = refund_amount
+                    plan.refund_note = refund_note
+                    plan.save(update_fields=['refunded_amount', 'refund_note'])
+                    detail += f' — refunded ₹{refund_amount}'
+                if cancelled:
+                    detail += f' — {cancelled} pending installment(s) cancelled'
 
         log_action(request.user, 'enrollment_withdraw', detail, refund_note)
         return Response(self.get_serializer(enrollment).data)
@@ -330,6 +337,97 @@ class SubstituteAssignmentViewSet(ModelViewSet):
             f'{instance.substitute_trainer.name} — was covering {instance.start_date} to {instance.end_date}',
         )
         instance.delete()
+
+
+class MyClientEnrollmentsView(APIView):
+    """Client-facing: every one of their own students' 1:1 enrollments (not
+    collapsed to one "primary" row per student like MyClientStudentsView/
+    client_students_with_progress — this is the full list, across every course
+    a student has ever been enrolled in). Deliberately excludes
+    trainer_rate_per_class/client_rate_per_class — EnrollmentSerializer
+    includes those (what we pay the trainer, in particular), which must never
+    reach a client — so this builds its own narrow row shape instead of
+    reusing that serializer.
+    """
+
+    permission_classes = [IsClient]
+
+    def get(self, request):
+        enrollments = (
+            Enrollment.objects.filter(student__client=request.user.client)
+            .select_related('student', 'course', 'trainer')
+            .order_by('-start_date')
+        )
+        return Response([
+            {
+                'id': e.id,
+                'student': e.student_id,
+                'student_name': e.student.name,
+                'course_name': e.course.name,
+                'trainer_name': e.trainer.name,
+                'batch_number': e.batch_number,
+                'classes_completed': e.classes_completed,
+                'classes_total': e.classes_total,
+                'status': e.status,
+                'start_date': e.start_date,
+                'class_time': e.class_time,
+                'class_days': e.class_days,
+            }
+            for e in enrollments
+        ])
+
+
+class MyClientEnrollmentReportView(APIView):
+    """Client-facing: download the same progress-report PDF the admin/trainer
+    "Download PDF" button produces (render_student_report_pdf), scoped to the
+    caller's own students only — enrollment__student__client=request.user.client
+    is what keeps this from becoming another client's report; a mismatched or
+    B2C enrollment id 404s here rather than ever reaching render_student_report_pdf.
+    """
+
+    permission_classes = [IsClient]
+
+    def get(self, request, pk=None):
+        enrollment = get_object_or_404(
+            Enrollment.objects.select_related('student', 'course'),
+            pk=pk, student__client=request.user.client,
+        )
+        pdf_bytes = render_student_report_pdf(enrollment)
+        slug = re.sub(r'[^A-Za-z0-9]+', '-', enrollment.student.name).strip('-').lower()
+        filename = f'student-report-{slug}-batch{enrollment.batch_number}.pdf'
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
+class MyClientEnrollmentCertificateView(APIView):
+    """Client-facing: download the same completion certificate the admin/trainer
+    "Download certificate" button produces (render_certificate_pdf), scoped and
+    404-safe the same way as MyClientEnrollmentReportView above. Only available
+    once the enrollment is 'completed' — same rule EnrollmentViewSet.certificate
+    enforces for admin/trainer."""
+
+    permission_classes = [IsClient]
+
+    def get(self, request, pk=None):
+        enrollment = get_object_or_404(
+            Enrollment.objects.select_related('student', 'course'),
+            pk=pk, student__client=request.user.client,
+        )
+        if enrollment.status != 'completed':
+            return Response(
+                {'detail': 'A certificate is only available once this enrollment is completed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pdf_bytes = render_certificate_pdf(enrollment)
+        slug = re.sub(r'[^A-Za-z0-9]+', '-', enrollment.student.name).strip('-').lower()
+        filename = f'certificate-{slug}-{enrollment.course.name.lower().replace(" ", "-")}.pdf'
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 
 class MyStudentsView(ListAPIView):

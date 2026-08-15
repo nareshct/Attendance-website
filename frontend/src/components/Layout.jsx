@@ -22,7 +22,7 @@ export default function Layout({ title, navItems, accentClass }) {
         }`}
       >
         <div className="p-5 text-base font-semibold border-b border-white/10 truncate">
-          {auth.role === 'trainer' ? `Hello, ${auth.name || auth.username}` : title}
+          {auth.role === 'trainer' || auth.role === 'client' ? `Hello, ${auth.name || auth.username}` : title}
         </div>
         <nav className="flex-1 p-3 space-y-0.5">
           {navItems.map((item) => (
@@ -46,7 +46,7 @@ export default function Layout({ title, navItems, accentClass }) {
         <div className="p-4 border-t border-white/10 text-sm space-y-2">
           <div className="truncate text-white/80">{auth.username}</div>
           <NavLink
-            to={`/${auth.role === 'admin' ? 'admin' : 'trainer'}/change-password`}
+            to={`/${auth.role}/change-password`}
             onClick={() => setMobileOpen(false)}
             className="block w-full rounded-lg bg-white/10 px-3 py-2 hover:bg-white/20 transition-colors duration-150 ease-out text-center"
           >

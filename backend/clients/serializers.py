@@ -29,6 +29,10 @@ class ClientSerializer(serializers.ModelSerializer):
     # that build a Client instance outside that queryset (e.g. serializer.save() in create()).
     active_student_count = serializers.SerializerMethodField()
     overdue_invoice_count = serializers.SerializerMethodField()
+    # Tells the admin frontend which login-management UI to show — "Set up client
+    # login" (no user yet) vs "Reset password" (one already exists). See
+    # ClientViewSet.set_up_login/.reset_password.
+    has_login = serializers.SerializerMethodField()
     # A multipart PATCH has no native way to send "clear this file field" (there's no
     # null in form-data) — this is the explicit signal for it instead. Mutually
     # exclusive with actually sending a new 'logo' file in the same request; see
@@ -40,7 +44,7 @@ class ClientSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'company_name', 'contact_phone', 'contact_email', 'rate_per_class',
             'status', 'logo', 'tagline', 'remove_logo', 'course_rates', 'contacts', 'pending_amount',
-            'active_student_count', 'overdue_invoice_count',
+            'active_student_count', 'overdue_invoice_count', 'has_login',
         ]
         read_only_fields = ['status']
 
@@ -94,3 +98,6 @@ class ClientSerializer(serializers.ModelSerializer):
             return obj.overdue_invoice_count
         cutoff = timezone.localdate() - timedelta(days=ClientInvoice.OVERDUE_GRACE_DAYS)
         return obj.invoices.filter(status='pending', cycle__cycle_end__lt=cutoff).count()
+
+    def get_has_login(self, obj):
+        return obj.user_id is not None

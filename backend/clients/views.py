@@ -1,23 +1,30 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.db.models import Count, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import filters, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
 from audit.services import log_action
 from billing.models import BillingCycle, ClientInvoice
 from billing.services import client_all_time_totals, client_current_cycle_totals, get_or_create_cycle
-from config.permissions import IsAdmin
+from config.models import AuthToken
+from config.permissions import IsAdmin, IsClient
 from students.models import Student
 
 from .models import Client, ClientContact, ClientCourseRate
 from .serializers import ClientContactSerializer, ClientCourseRateSerializer, ClientSerializer
-from .services import client_totals, get_archive_blockers
+from .services import client_students_with_progress, get_archive_blockers
 
 
 class ClientViewSet(ModelViewSet):
@@ -121,6 +128,12 @@ class ClientViewSet(ModelViewSet):
             )
         client.status = 'archived'
         client.save(update_fields=['status'])
+        # Most clients have no login at all (see set_up_login below) — guard for that,
+        # mirroring TrainerViewSet.archive's is_active=False (blocks future login and
+        # immediately invalidates any live token) for the clients that do have one.
+        if client.user_id:
+            client.user.is_active = False
+            client.user.save(update_fields=['is_active'])
         log_action(request.user, 'client_archive', client.company_name)
         return Response(ClientSerializer(client).data)
 
@@ -129,8 +142,69 @@ class ClientViewSet(ModelViewSet):
         client = self.get_object()
         client.status = 'active'
         client.save(update_fields=['status'])
+        if client.user_id:
+            client.user.is_active = True
+            client.user.save(update_fields=['is_active'])
         log_action(request.user, 'client_unarchive', client.company_name)
         return Response(ClientSerializer(client).data)
+
+    @action(detail=True, methods=['post'], url_path='set-up-login')
+    def set_up_login(self, request, pk=None):
+        """Grants a client portal access — unlike Trainer, this is optional and can
+        happen any time after the client itself was created (see Client.user's
+        nullable field)."""
+        client = self.get_object()
+        if client.status == 'archived':
+            return Response(
+                {'detail': 'This client is archived — unarchive it first before granting a login.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if client.user_id:
+            return Response(
+                {'detail': 'This client already has a login — use reset-password instead.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        username = request.data.get('username')
+        password = request.data.get('password')
+        if not username or not password:
+            return Response(
+                {'detail': 'username and password are required.'}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if User.objects.filter(username=username).exists():
+            return Response({'username': 'A user with this username already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_password(password)
+        except ValidationError as exc:
+            return Response({'detail': ' '.join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.create_user(username=username, password=password)
+        client.user = user
+        client.save(update_fields=['user'])
+        log_action(request.user, 'client_set_up_login', client.company_name, username)
+        return Response(ClientSerializer(client).data)
+
+    @action(detail=True, methods=['post'], url_path='reset-password')
+    def reset_password(self, request, pk=None):
+        client = self.get_object()
+        if not client.user_id:
+            return Response({'detail': 'This client has no login set up yet.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_password = request.data.get('new_password')
+        if not new_password:
+            return Response({'detail': 'new_password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_password(new_password, user=client.user)
+        except ValidationError as exc:
+            return Response({'detail': ' '.join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        client.user.set_password(new_password)
+        client.user.save(update_fields=['password'])
+        # Kill every session (every device's token) the client is currently logged in
+        # with — mirrors TrainerViewSet.reset_password exactly.
+        AuthToken.objects.filter(user=client.user).delete()
+        log_action(request.user, 'client_reset_password', client.company_name)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['get'])
     def earnings(self, request, pk=None):
@@ -163,21 +237,25 @@ class ClientViewSet(ModelViewSet):
     def earnings_history(self, request, pk=None):
         """Per-cycle classes/revenue/earning for the last N cycles (chronological), for a trend chart."""
         client = self.get_object()
-        limit = int(request.query_params.get('limit', 12))
+        limit_param = request.query_params.get('limit', '12')
+        if not limit_param.isdigit():
+            raise DRFValidationError({'limit': 'Invalid limit — must be a positive integer.'})
+        limit = int(limit_param)
 
         cycles = list(BillingCycle.objects.order_by('-cycle_start')[:limit])
         cycles.reverse()
 
         history = []
         for cycle in cycles:
-            if cycle.status == 'open':
-                # Pass this exact cycle, not the default (today's) one — normally the
-                # only 'open' cycle is today's anyway, but BillingCycleViewSet.reopen()
-                # can put an old cycle back to 'open' too, and this loop would otherwise
-                # show today's totals against that old cycle's row instead of its own.
-                totals = client_current_cycle_totals(client, cycle=cycle)
-            else:
-                totals = client_totals(client, cycle.cycle_start, cycle.cycle_end)
+            # Always pass this exact cycle (not the default "today's" one — normally the
+            # only 'open' cycle is today's anyway, but BillingCycleViewSet.reopen() can
+            # put an old cycle back to 'open' too). Used for every cycle, not just open
+            # ones: client_current_cycle_totals() also folds in any ClientInvoiceAdjustment
+            # already assigned to it (a late-approved class carried forward from an
+            # earlier, already-closed cycle) — client_totals() alone excludes those, which
+            # would under-report a closed cycle relative to the real ClientInvoice actually
+            # sent for it.
+            totals = client_current_cycle_totals(client, cycle=cycle)
             history.append({
                 'cycle_start': cycle.cycle_start,
                 'cycle_end': cycle.cycle_end,
@@ -189,6 +267,91 @@ class ClientViewSet(ModelViewSet):
         return Response(history)
 
 
+class MyClientProfileView(APIView):
+    """Client-facing: their own profile. ClientSerializer is already margin-free
+    (pending_amount is live billing, not our earning), so it's safe to reuse
+    directly here — unlike ClientViewSet.earnings/earnings_history, which must
+    never be exposed to the client themselves (see MyClientCurrentCycleView in
+    billing/views.py)."""
+
+    permission_classes = [IsClient]
+
+    def get(self, request):
+        return Response(ClientSerializer(request.user.client).data)
+
+
+class MyClientStudentsView(APIView):
+    """Client-facing: their own students, with course/batch + progress —
+    server-side version of ClientDetailPage.jsx's studentPrimaryEnrollment/
+    studentPrimaryBatchEnrollment picking logic. See client_students_with_progress."""
+
+    permission_classes = [IsClient]
+
+    def get(self, request):
+        return Response(client_students_with_progress(request.user.client))
+
+
+class MyClientStudentDetailView(APIView):
+    """Client-facing: one of their own students' enrollments, batch memberships,
+    and recent class history. Same narrow, read-only shape as
+    students.views.ParentShareView (no rates, no payment/installment amounts,
+    no other students) — get_object_or_404's client=request.user.client filter
+    is what keeps this scoped to the caller's own students; another client's
+    (or a B2C student's) id 404s here rather than ever being serialized."""
+
+    permission_classes = [IsClient]
+
+    def get(self, request, student_id):
+        student = get_object_or_404(Student, id=student_id, client=request.user.client)
+
+        enrollments = (
+            student.enrollments.select_related('course', 'trainer')
+            .prefetch_related('attendance_records')
+            .order_by('-start_date')
+        )
+        enrollment_rows = [
+            {
+                'id': e.id,
+                'course_name': e.course.name,
+                'trainer_name': e.trainer.name,
+                'batch_number': e.batch_number,
+                'classes_completed': e.classes_completed,
+                'classes_total': e.classes_total,
+                'status': e.status,
+                'start_date': e.start_date,
+                'class_time': e.class_time,
+                'class_days': e.class_days,
+                'recent_classes': [
+                    {'date': a.date, 'topic_covered': a.topic_covered}
+                    for a in e.attendance_records.filter(status='present').order_by('-date')
+                ],
+            }
+            for e in enrollments
+        ]
+
+        batch_enrollments = student.batch_enrollments.select_related('batch__course').order_by('-joined_date')
+        batch_rows = [
+            {
+                'id': be.id,
+                'batch_name': be.batch.name,
+                'course_name': be.batch.course.name,
+                'status': be.status,
+                'joined_date': be.joined_date,
+            }
+            for be in batch_enrollments
+        ]
+
+        return Response({
+            'id': student.id,
+            'student_id': student.student_id,
+            'name': student.name,
+            'grade': student.grade,
+            'status': student.status,
+            'enrollments': enrollment_rows,
+            'batch_enrollments': batch_rows,
+        })
+
+
 class ClientCourseRateViewSet(ModelViewSet):
     queryset = ClientCourseRate.objects.select_related('client', 'course').all()
     serializer_class = ClientCourseRateSerializer
@@ -198,6 +361,8 @@ class ClientCourseRateViewSet(ModelViewSet):
         qs = super().get_queryset()
         client_id = self.request.query_params.get('client')
         if client_id:
+            if not client_id.isdigit():
+                raise DRFValidationError({'client': 'Invalid client filter.'})
             qs = qs.filter(client_id=client_id)
         return qs
 
@@ -211,5 +376,7 @@ class ClientContactViewSet(ModelViewSet):
         qs = super().get_queryset()
         client_id = self.request.query_params.get('client')
         if client_id:
+            if not client_id.isdigit():
+                raise DRFValidationError({'client': 'Invalid client filter.'})
             qs = qs.filter(client_id=client_id)
         return qs

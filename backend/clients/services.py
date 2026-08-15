@@ -97,6 +97,71 @@ def client_totals(client, start=None, end=None, as_of=None):
     }
 
 
+def client_students_with_progress(client):
+    """One row per this client's student with their 'primary' course/batch and
+    progress — the same picking rule frontend/src/pages/admin/ClientDetailPage.jsx
+    (and StudentsPage.jsx) apply client-side: prefer a 1:1 Enrollment over a group
+    Batch enrollment; among enrollments, prefer 'ongoing' status, then the most
+    recently started; same tie-break for BatchEnrollment's 'active'/joined_date.
+
+    progress is None for a batch-only student — batches have no per-student class
+    count (see BatchEnrollment.STATUS_CHOICES) — the frontend renders that as "not
+    tracked per student" rather than a fabricated number.
+
+    Imported lazily, not at module level — same reasoning as get_archive_blockers
+    just below: keeps the clients app from taking a hard import dependency on every
+    domain app that happens to reference Client.
+    """
+    from batches.models import BatchEnrollment
+    from enrollments.models import Enrollment
+    from students.models import Student
+
+    students = Student.objects.filter(client=client).order_by('name')
+
+    primary_enrollment = {}
+    for e in Enrollment.objects.filter(student__client=client).select_related('course'):
+        current = primary_enrollment.get(e.student_id)
+        if (
+            not current
+            or (e.status == 'ongoing' and current.status != 'ongoing')
+            or (e.status == current.status and e.start_date > current.start_date)
+        ):
+            primary_enrollment[e.student_id] = e
+
+    primary_batch = {}
+    for be in BatchEnrollment.objects.filter(student__client=client).select_related('batch__course'):
+        current = primary_batch.get(be.student_id)
+        if (
+            not current
+            or (be.status == 'active' and current.status != 'active')
+            or (be.status == current.status and be.joined_date > current.joined_date)
+        ):
+            primary_batch[be.student_id] = be
+
+    rows = []
+    for s in students:
+        e = primary_enrollment.get(s.id)
+        be = primary_batch.get(s.id)
+        if e:
+            course_batch = f'{e.course.name} — Batch {e.batch_number}'
+            progress = f'{e.classes_completed}/{e.classes_total}'
+        elif be:
+            course_batch = f'{be.batch.course.name} — {be.batch.name}'
+            progress = None
+        else:
+            course_batch = None
+            progress = None
+        rows.append({
+            'id': s.id,
+            'student_id': s.student_id,
+            'name': s.name,
+            'status': s.status,
+            'course_batch': course_batch,
+            'progress': progress,
+        })
+    return rows
+
+
 def get_archive_blockers(client):
     """Everything still tying this client to active/unresolved billing — hard-
     blocks ClientViewSet.archive() until it's empty. See ArchiveClientModal.

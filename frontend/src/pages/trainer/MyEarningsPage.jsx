@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import { downloadFile } from '../../api/client'
 import { Badge } from '../../components/Badge'
 import { Card, StatCard } from '../../components/Card'
+import { useAuth } from '../../hooks/useAuth'
 import { useApi } from '../../hooks/useApi'
 import { usePaginatedList } from '../../hooks/usePaginatedList'
 import { formatDate, formatDateRange } from '../../utils/date'
@@ -15,6 +17,7 @@ const HERO_VALUE_CLASS = 'text-navy'
 
 export default function MyEarningsPage() {
   const api = useApi()
+  const { auth } = useAuth()
   // Same paginated "Load more"/"Load less" pattern as the admin Payouts page —
   // /api/my-earnings/ is paginated server-side (see DEFAULT_PAGINATION_CLASS in
   // backend/config/settings.py), so an unbounded fetch here would eventually hit
@@ -30,6 +33,7 @@ export default function MyEarningsPage() {
   const [currentCycleAttendance, setCurrentCycleAttendance] = useState([])
   const [showCurrentCycleClasses, setShowCurrentCycleClasses] = useState(false)
   const [loadingCurrentCycleClasses, setLoadingCurrentCycleClasses] = useState(false)
+  const [downloadingCsvKey, setDownloadingCsvKey] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -83,6 +87,18 @@ export default function MyEarningsPage() {
       setError(err.message)
     } finally {
       setLoadingCurrentCycleClasses(false)
+    }
+  }
+
+  async function handleDownloadCsv(key, start, end) {
+    setDownloadingCsvKey(key)
+    setError('')
+    try {
+      await downloadFile(`/api/reports/my-attendance/?start=${start}&end=${end}`, auth.token)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDownloadingCsvKey(null)
     }
   }
 
@@ -289,6 +305,7 @@ export default function MyEarningsPage() {
               <th className="table-head-cell">Classes</th>
               <th className="table-head-cell">Amount</th>
               <th className="table-head-cell">Status</th>
+              <th className="table-head-cell text-center">Download</th>
             </tr>
           </thead>
           <tbody>
@@ -305,6 +322,15 @@ export default function MyEarningsPage() {
                   )}
                 </td>
                 <td className="table-cell"><Badge status="open" /></td>
+                <td className="table-cell text-center">
+                  <button
+                    disabled={downloadingCsvKey === 'current'}
+                    onClick={() => handleDownloadCsv('current', current.cycle_start, current.cycle_end)}
+                    className="text-xs font-medium text-text-secondary hover:text-primary disabled:opacity-60 focus-ring"
+                  >
+                    {downloadingCsvKey === 'current' ? 'Downloading…' : 'Attendance (CSV)'}
+                  </button>
+                </td>
               </tr>
             )}
             {currentCycleAdditional && (
@@ -316,6 +342,7 @@ export default function MyEarningsPage() {
                   <div className="text-xs text-warning">earned after the payout below was settled</div>
                 </td>
                 <td className="table-cell"><Badge status="open" /></td>
+                <td className="table-cell"></td>
               </tr>
             )}
             {currentCyclePayout && (
@@ -329,6 +356,15 @@ export default function MyEarningsPage() {
                   )}
                 </td>
                 <td className="table-cell"><Badge status={currentCyclePayout.paid_status} /></td>
+                <td className="table-cell text-center">
+                  <button
+                    disabled={downloadingCsvKey === currentCyclePayout.id}
+                    onClick={() => handleDownloadCsv(currentCyclePayout.id, currentCyclePayout.cycle_start, currentCyclePayout.cycle_end)}
+                    className="text-xs font-medium text-text-secondary hover:text-primary disabled:opacity-60 focus-ring"
+                  >
+                    {downloadingCsvKey === currentCyclePayout.id ? 'Downloading…' : 'Attendance (CSV)'}
+                  </button>
+                </td>
               </tr>
             )}
             {history.map((p) => (
@@ -342,10 +378,19 @@ export default function MyEarningsPage() {
                   )}
                 </td>
                 <td className="table-cell"><Badge status={p.paid_status} /></td>
+                <td className="table-cell text-center">
+                  <button
+                    disabled={downloadingCsvKey === p.id}
+                    onClick={() => handleDownloadCsv(p.id, p.cycle_start, p.cycle_end)}
+                    className="text-xs font-medium text-text-secondary hover:text-primary disabled:opacity-60 focus-ring"
+                  >
+                    {downloadingCsvKey === p.id ? 'Downloading…' : 'Attendance (CSV)'}
+                  </button>
+                </td>
               </tr>
             ))}
             {history.length === 0 && !current && (
-              <tr><td colSpan={4} className="px-4 py-6 text-center text-text-tertiary">No payouts yet.</td></tr>
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-text-tertiary">No payouts yet.</td></tr>
             )}
           </tbody>
         </table>
